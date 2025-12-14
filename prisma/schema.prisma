@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_DIRECT_URL")
+}
+
+model Coach {
+  coachId              String   @id @default(cuid()) @map("coach_id")
+  email                String   @unique @map("email")
+  passwordHash         String   @map("password_hash")
+  name                 String?  @map("name")
+  roundingIncrementKg  Float?   @map("rounding_increment_kg")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  athletes             Athlete[]
+
+  @@map("coach")
+}
+
+model Athlete {
+  athleteId     String   @id @default(cuid()) @map("athlete_id")
+  coachId       String   @map("coach_id")
+
+  firstName     String   @map("first_name")
+  lastName      String   @map("last_name")
+
+  notesPublic   String?  @map("notes_public")
+  notesPrivate  String?  @map("notes_private")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  coach         Coach    @relation(fields: [coachId], references: [coachId], onDelete: Cascade)
+  auth          AthleteAuth?
+  invites       AthleteInvite[]
+
+  @@index([coachId], map: "idx_athlete_coach_id")
+  @@map("athlete")
+}
+
+model AthleteAuth {
+  athleteId        String    @id @map("athlete_id")
+  loginIdentifier  String    @unique @map("login_identifier") // EMAIL
+  passwordHash     String?   @map("password_hash")
+  activatedAt      DateTime? @map("activated_at")
+
+  athlete          Athlete   @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
+
+  @@map("athlete_auth")
+}
+
+model AthleteInvite {
+  inviteId     String    @id @default(cuid()) @map("invite_id")
+  athleteId    String    @map("athlete_id")
+
+  tokenHash    String    @unique @map("token_hash")
+  expiresAt    DateTime  @map("expires_at")
+  usedAt       DateTime? @map("used_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  athlete      Athlete   @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
+
+  @@index([athleteId], map: "idx_invite_athlete_id")
+  @@map("athlete_invite")
+}
