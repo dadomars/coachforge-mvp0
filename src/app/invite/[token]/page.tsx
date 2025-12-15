@@ -1,8 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Params = Record<string, string | string[] | undefined>;
 
@@ -26,26 +25,27 @@ export default function InviteActivatePage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const [activated, setActivated] = useState(false);
+  // ✅ anti-autofill: quando la pagina monta, svuotiamo i campi
+  useEffect(() => {
+    setEmail("");
+    setPassword("");
+  }, [token]);
 
-  async function onSubmit(e: FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setMsg(null);
     setLoading(true);
 
     try {
-      const normalizedEmail = email.trim().toLowerCase();
-
       const r = await fetch("/api/invites/accept", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           token,
-          email: normalizedEmail,
+          email: email.trim().toLowerCase(),
           password,
         }),
       });
@@ -57,8 +57,9 @@ export default function InviteActivatePage() {
         return;
       }
 
-      setActivated(true);
-      setMsg("✅ Attivazione completata! Ora puoi fare login come atleta.");
+      setMsg("✅ Account attivato. Vai al login atleta…");
+      // piccolo delay per far vedere il messaggio (UX)
+      setTimeout(() => router.push("/athlete-login?activated=1"), 700);
     } finally {
       setLoading(false);
     }
@@ -78,79 +79,58 @@ export default function InviteActivatePage() {
         Invito: <code>{token ? "presente" : "mancante"}</code>
       </div>
 
-      {!token && (
-        <div
-          style={{
-            padding: 12,
-            borderRadius: 10,
-            border: "1px solid #f1c40f",
-            background: "#fff7d6",
-            marginBottom: 14,
-          }}
-        >
-          Link invito non valido (token mancante).
-        </div>
-      )}
-
-      <form onSubmit={onSubmit} style={{ display: "grid", gap: 14 }}>
+      <form
+        onSubmit={onSubmit}
+        style={{ display: "grid", gap: 14 }}
+        autoComplete="off"
+      >
         <label style={{ display: "grid", gap: 6 }}>
           <span>Email</span>
           <input
+            name="athlete_email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="es. mario.rossi@test.it"
+            autoComplete="off"
             style={{
               padding: "12px 14px",
               borderRadius: 10,
               border: "1px solid #ccc",
             }}
-            disabled={activated}
           />
         </label>
 
         <label style={{ display: "grid", gap: 6 }}>
           <span>Password</span>
           <input
+            name="athlete_new_password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             type="password"
             placeholder="es. Test1234!"
+            // ✅ questo aiuta molto contro autofill credenziali esistenti
+            autoComplete="new-password"
             style={{
               padding: "12px 14px",
               borderRadius: 10,
               border: "1px solid #ccc",
             }}
-            disabled={activated}
           />
         </label>
 
-        {!activated ? (
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            style={{
-              padding: "12px 14px",
-              borderRadius: 12,
-              border: "1px solid #333",
-              cursor: canSubmit ? "pointer" : "not-allowed",
-            }}
-          >
-            {loading ? "Attivo..." : "Attiva account"}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => router.push("/athlete-login?activated=1")}
-            style={{
-              padding: "12px 14px",
-              borderRadius: 12,
-              border: "1px solid #333",
-              cursor: "pointer",
-            }}
-          >
-            Vai al login atleta
-          </button>
-        )}
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          style={{
+            padding: "12px 14px",
+            borderRadius: 12,
+            border: "1px solid #333",
+            cursor: canSubmit ? "pointer" : "not-allowed",
+            fontWeight: 800,
+          }}
+        >
+          {loading ? "Attivo..." : "Attiva account"}
+        </button>
 
         {msg && (
           <div
