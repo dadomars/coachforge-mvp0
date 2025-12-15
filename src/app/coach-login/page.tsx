@@ -9,7 +9,7 @@ export default function CoachLoginPage() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  async function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErrorMsg(null);
     setLoading(true);
@@ -18,6 +18,7 @@ export default function CoachLoginPage() {
       redirect: false,
       email: email.trim().toLowerCase(),
       password,
+      loginAs: "COACH",
       callbackUrl: "/coach",
     });
 
@@ -29,6 +30,14 @@ export default function CoachLoginPage() {
     }
 
     if (res.error) {
+      if (res.error === "ROLE_MISMATCH") {
+        setErrorMsg("❌ Non autorizzato: questo è il login COACH. Usa il login ATLETA.");
+        return;
+      }
+      if (res.error === "LOGIN_AS_REQUIRED") {
+        setErrorMsg("❌ Errore configurazione login (loginAs mancante).");
+        return;
+      }
       setErrorMsg("Credenziali non valide.");
       return;
     }
@@ -39,9 +48,7 @@ export default function CoachLoginPage() {
   return (
     <main style={{ maxWidth: 420, margin: "40px auto", padding: 16 }}>
       <h1 style={{ fontSize: 28, fontWeight: 700 }}>Login Coach</h1>
-      <p style={{ marginTop: 8, opacity: 0.8 }}>
-        Inserisci email e password del coach.
-      </p>
+      <p style={{ marginTop: 8, opacity: 0.8 }}>Inserisci email e password del coach.</p>
 
       <form onSubmit={onSubmit} style={{ marginTop: 20, display: "grid", gap: 12 }}>
         <label style={{ display: "grid", gap: 6 }}>

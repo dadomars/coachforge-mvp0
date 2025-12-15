@@ -10,6 +10,27 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 const prisma = globalForPrisma.prisma ?? new PrismaClient();
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
+type Creds = {
+  email?: string;
+  password?: string;
+  loginAs?: string; // "COACH" | "ATHLETE"
+};
+
+async function isValidCoach(email: string, password: string) {
+  const coach = await prisma.coach.findUnique({ where: { email } });
+  if (!coach?.passwordHash) return false;
+  return bcrypt.compare(password, coach.passwordHash);
+}
+
+async function isValidAthlete(email: string, password: string) {
+  const athleteAuth = await prisma.athleteAuth.findUnique({
+    where: { loginIdentifier: email },
+  });
+  if (!athleteAuth?.passwordHash) return false;
+  if (!athleteAuth.activatedAt) return false;
+  return bcrypt.compare(password, athleteAuth.passwordHash);
+}
+
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
 
@@ -19,42 +40,72 @@ export const authOptions: NextAuthOptions = {
       credentials: {
         email: { label: "Email", type: "text" },
         password: { label: "Password", type: "password" },
+        loginAs: { label: "LoginAs", type: "text" }, // 👈 aggiunto
       },
 
       async authorize(credentials) {
-        const email = credentials?.email?.toLowerCase().trim();
-        const password = credentials?.password;
+        const c = credentials as unknown as Creds;
 
-        if (!email || !password) return null;
+        const email = c?.email?.toLowerCase().trim() ?? "";
+        const password = c?.password ?? "";
+        const loginAs = (c?.loginAs ?? "").toString(); // "COACH" | "ATHLETE"
 
-        // 1) PROVA COACH
-        const coach = await prisma.coach.findUnique({ where: { email } });
-        if (coach?.passwordHash) {
-          const okCoach = await bcrypt.compare(password, coach.passwordHash);
-          if (okCoach) {
-            return { id: coach.coachId, email: coach.email, role: "COACH" as const };
-          }
-          // IMPORTANTISSIMO: se password sbagliata, NON tornare null qui.
-          // Devi provare anche ATHLETE (stessa email potrebbe essere atleta).
+        if (!email || !password || !loginAs) {
+          throw new Error("LOGIN_AS_REQUIRED");
         }
 
-        // 2) PROVA ATHLETE (SSOT attivazione = athlete_auth.activated_at)
-        const athleteAuth = await prisma.athleteAuth.findUnique({
-          where: { loginIdentifier: email },
-        });
+        // ===== LOGIN COACH =====
+        if (loginAs === "COACH") {
+          const coach = await prisma.coach.findUnique({ where: { email } });
 
-        if (!athleteAuth) return null;
-        if (!athleteAuth.activatedAt) return null;
-        if (!athleteAuth.passwordHash) return null;
+          if (!coach?.passwordHash) {
+            // se invece è un atleta valido, è mismatch
+            if (await isValidAthlete(email, password)) throw new Error("ROLE_MISMATCH");
+            return null;
+          }
 
-        const okAthlete = await bcrypt.compare(password, athleteAuth.passwordHash);
-        if (!okAthlete) return null;
+          const okCoach = await bcrypt.compare(password, coach.passwordHash);
+          if (!okCoach) {
+            if (await isValidAthlete(email, password)) throw new Error("ROLE_MISMATCH");
+            return null;
+          }
 
-        return {
-          id: athleteAuth.athleteId,
-          email: athleteAuth.loginIdentifier,
-          role: "ATHLETE" as const,
-        };
+          return { id: coach.coachId, email: coach.email, role: "COACH" as const };
+        }
+
+        // ===== LOGIN ATHLETE =====
+        if (loginAs === "ATHLETE") {
+          const athleteAuth = await prisma.athleteAuth.findUnique({
+            where: { loginIdentifier: email },
+          });
+
+          if (!athleteAuth) {
+            // se invece è un coach valido, è mismatch
+            if (await isValidCoach(email, password)) throw new Error("ROLE_MISMATCH");
+            return null;
+          }
+
+          // SSOT: attivo solo se activatedAt valorizzato
+          if (!athleteAuth.activatedAt) {
+            throw new Error("ATHLETE_NOT_ACTIVE");
+          }
+
+          if (!athleteAuth.passwordHash) return null;
+
+          const okAthlete = await bcrypt.compare(password, athleteAuth.passwordHash);
+          if (!okAthlete) {
+            if (await isValidCoach(email, password)) throw new Error("ROLE_MISMATCH");
+            return null;
+          }
+
+          return {
+            id: athleteAuth.athleteId,
+            email: athleteAuth.loginIdentifier,
+            role: "ATHLETE" as const,
+          };
+        }
+
+        throw new Error("LOGIN_AS_REQUIRED");
       },
     }),
   ],
