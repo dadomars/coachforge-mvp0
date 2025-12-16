@@ -281,6 +281,8 @@ export default function CoachAthletesPage() {
               const inv = inviteByAthleteId[a.athleteId];
               const invErr = inviteErrByAthleteId[a.athleteId];
               const invLoading = inviteLoadingId === a.athleteId;
+              const isActive = !!a.activatedAt;
+              
 
               return (
                 <div
@@ -333,23 +335,25 @@ export default function CoachAthletesPage() {
   </div>
 
   <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
-    <button
-      onClick={() => createInvite(a.athleteId)}
-      disabled={invLoading}
-      style={{
-        padding: "10px 12px",
-        borderRadius: 12,
-        border: "1px solid #333",
-        cursor: invLoading ? "not-allowed" : "pointer",
-        fontWeight: 900,
-      }}
-    >
-      {invLoading ? "Genero..." : "Crea invito"}
-    </button>
+    {!isActive ? (
+  <button
+    onClick={() => createInvite(a.athleteId)}
+    disabled={invLoading}
+    style={{
+      padding: "10px 12px",
+      borderRadius: 12,
+      border: "1px solid #333",
+      cursor: invLoading ? "not-allowed" : "pointer",
+      fontWeight: 900,
+    }}
+  >
+    {invLoading ? "Genero..." : "Crea invito"}
+  </button>
+) : null}
   </div>
 </div>
 
-                  {inv ? (
+                  {!isActive&&inv ? (
                     <div
                       style={{
                         padding: 12,
