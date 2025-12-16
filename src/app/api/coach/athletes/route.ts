@@ -27,11 +27,25 @@ export async function GET() {
       lastName: true,
       notesPublic: true,
       createdAt: true,
+      auth: {
+        select: {
+          activatedAt: true, // ✅ SSOT: athlete_auth.activated_at
+        },
+      },
     },
   });
 
-  // ritorno diretto array (la tua UI lo gestisce)
-  return NextResponse.json(athletes);
+  // ✅ Response piatta: la UI può leggere direttamente activatedAt (string|null via JSON)
+  const out = athletes.map((a) => ({
+    athleteId: a.athleteId,
+    firstName: a.firstName,
+    lastName: a.lastName,
+    notesPublic: a.notesPublic,
+    createdAt: a.createdAt,
+    activatedAt: a.auth?.activatedAt ?? null,
+  }));
+
+  return NextResponse.json(out);
 }
 
 export async function POST(req: Request) {
@@ -59,7 +73,6 @@ export async function POST(req: Request) {
       firstName,
       lastName,
       notesPublic,
-      // notesPrivate: null, // se nel tuo schema è required e NON nullable, dimmelo e lo gestiamo
     },
     select: {
       athleteId: true,
