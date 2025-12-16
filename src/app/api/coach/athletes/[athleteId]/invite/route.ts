@@ -46,15 +46,18 @@ export async function POST(
     return NextResponse.json({ error: "Athlete not found" }, { status: 404 });
   }
 
-  // Guard SSOT: atleta attivo se athlete_auth.activated_at != null
-  const auth = await prisma.athleteAuth.findUnique({
-    where: { athleteId },
-    select: { activatedAt: true },
-  });
+  // ✅ GUARDIA: se l'atleta è già attivo, non generare inviti
+const auth = await prisma.athleteAuth.findUnique({
+  where: { athleteId },
+  select: { activatedAt: true },
+});
 
-  if (auth?.activatedAt) {
-    return NextResponse.json({ error: "Athlete already activated" }, { status: 400 });
-  }
+if (auth?.activatedAt) {
+  return NextResponse.json(
+    { error: "Atleta già attivo: invito non necessario." },
+    { status: 409 }
+  );
+}
 
   // ✅ FIX: invalida TUTTI gli inviti non usati (senza filtri su expiresAt)
   await prisma.athleteInvite.updateMany({
