@@ -7,6 +7,7 @@ type AthleteRow = {
   firstName: string;
   lastName: string;
   notesPublic?: string | null;
+  activatedAt?: string | null;
 };
 
 type InviteResponse = {
@@ -76,8 +77,12 @@ export default function CoachAthletesPage() {
               : null;
 
           if (!athleteId || !firstName || !lastName) return null;
+          const activatedAt =
+  typeof o.activatedAt === "string" || o.activatedAt === null
+    ? (o.activatedAt as string | null)
+    : null;
 
-          return { athleteId, firstName, lastName, notesPublic };
+          return { athleteId, firstName, lastName, notesPublic, activatedAt };
         })
         .filter(Boolean) as AthleteRow[];
 
@@ -101,14 +106,14 @@ export default function CoachAthletesPage() {
     try {
       // ✅ FIX: l’API vuole camelCase (firstName/lastName/notesPublic)
       const r = await fetch("/api/coach/athletes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-          notesPublic: notesPublic.trim() || null,
-        }),
-      });
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    firstName: firstName.trim(),
+    lastName: lastName.trim(),
+    notesPublic: notesPublic.trim() || null,
+  }),
+});
 
       const data: unknown = await r.json().catch(() => ({}));
 
@@ -289,43 +294,60 @@ export default function CoachAthletesPage() {
                   }}
                 >
                   <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 12,
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 900 }}>
-                        {a.firstName} {a.lastName}
-                      </div>
-                      <div style={{ fontSize: 12, opacity: 0.75, wordBreak: "break-all" }}>
-                        ID: <code>{a.athleteId}</code>
-                      </div>
-                      {a.notesPublic ? (
-                        <div style={{ marginTop: 6, fontSize: 13, opacity: 0.85 }}>
-                          Note: <span>{a.notesPublic}</span>
-                        </div>
-                      ) : null}
-                    </div>
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  }}
+>
+  <div style={{ minWidth: 0 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 900 }}>
+      <span>
+        {a.firstName} {a.lastName}
+      </span>
 
-                    <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
-                      <button
-                        onClick={() => createInvite(a.athleteId)}
-                        disabled={invLoading}
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: 12,
-                          border: "1px solid #333",
-                          cursor: invLoading ? "not-allowed" : "pointer",
-                          fontWeight: 900,
-                        }}
-                      >
-                        {invLoading ? "Genero..." : "Crea invito"}
-                      </button>
-                    </div>
-                  </div>
+      <span
+        style={{
+          fontSize: 12,
+          fontWeight: 900,
+          padding: "4px 8px",
+          borderRadius: 999,
+          border: "1px solid #ddd",
+          opacity: 0.9,
+        }}
+      >
+        {a.activatedAt ? "ATTIVO" : "NON ATTIVO"}
+      </span>
+    </div>
+
+    <div style={{ fontSize: 12, opacity: 0.75, wordBreak: "break-all" }}>
+      ID: <code>{a.athleteId}</code>
+    </div>
+
+    {a.notesPublic ? (
+      <div style={{ marginTop: 6, fontSize: 13, opacity: 0.85 }}>
+        Note: <span>{a.notesPublic}</span>
+      </div>
+    ) : null}
+  </div>
+
+  <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+    <button
+      onClick={() => createInvite(a.athleteId)}
+      disabled={invLoading}
+      style={{
+        padding: "10px 12px",
+        borderRadius: 12,
+        border: "1px solid #333",
+        cursor: invLoading ? "not-allowed" : "pointer",
+        fontWeight: 900,
+      }}
+    >
+      {invLoading ? "Genero..." : "Crea invito"}
+    </button>
+  </div>
+</div>
 
                   {inv ? (
                     <div
