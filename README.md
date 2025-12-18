@@ -1,25 +1,33 @@
-# CoachForge — MVP-0
+# CoachForge — MVP-0 (Setup A)
 
-Web app coach-first (Weightlifting) — MVP-0 con:
-- Login Coach / Athlete
-- Inviti one-time (token hashato in DB, mai token in chiaro)
-- RBAC: `/coach/*` solo COACH, `/athlete/*` solo ATHLETE
-- SSOT attivazione atleta: `athlete_auth.activated_at`
+Web app **coach-first** (UI in italiano, unità Kg) per gestione atleti e inviti one-time.
 
-UI in italiano. Unità: Kg. Single coach owner.
+## Tech Lock (Setup A)
+- Next.js (App Router) + TypeScript
+- Postgres gestito (Neon)
+- Prisma + Prisma Migrate
+- Auth: NextAuth (Credentials) + RBAC Coach/Athlete
+- Hosting: Vercel
+- SSOT attivazione atleta: `athlete_auth.activated_at` (derivato “ATTIVO/NON ATTIVO”)
 
 ---
 
-## Prerequisiti
-
-- Node.js LTS
+## Requisiti locali
+- Node.js (LTS)
 - pnpm
-- Postgres (Neon consigliato)
+- Git
+
+Verifica:
+- `node -v`
+- `pnpm -v`
+- `git --version`
 
 ---
 
 ## Setup locale (DEV)
 
-1) Installa dipendenze
+### 1) Clona e installa
 ```bash
+git clone <repo-url>
+cd coachforge-mvp0
 pnpm install
