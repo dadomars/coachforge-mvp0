@@ -75,6 +75,13 @@ enum EventStatus {
   CANCELLED
 }
 
+enum CompetitionType {
+  HYROX
+  CROSSFIT
+  RUN
+  ALTRO
+}
+
 model Competition {
   competitionId String      @id @default(cuid()) @map("competition_id")
   athleteId     String      @map("athlete_id")
@@ -82,9 +89,12 @@ model Competition {
   dateStart     DateTime    @map("date_start")
   dateEnd       DateTime?   @map("date_end")
   location      String?     @map("location")
-  notes         String      @map("notes")
+  notesPublic   String      @default("") @map("notes_public")
+  notesPrivate  String      @default("") @map("notes_private")
   status        EventStatus @map("status")
+  type          CompetitionType @default(ALTRO) @map("type")
   isTarget      Boolean     @default(false) @map("is_target")
+  link          String?     @map("link")
 
   athlete       Athlete     @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
 
@@ -99,9 +109,11 @@ model Event {
   dateStart  DateTime    @map("date_start")
   dateEnd    DateTime?   @map("date_end")
   location   String?     @map("location")
-  notes      String      @map("notes")
+  notesPublic  String     @default("") @map("notes_public")
+  notesPrivate String     @default("") @map("notes_private")
   status     EventStatus @map("status")
   typeLabel  String      @map("type_label")
+  link       String?     @map("link")
 
   athlete    Athlete     @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
 
