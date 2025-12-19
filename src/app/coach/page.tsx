@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import ForbiddenBanner from "@/components/ForbiddenBanner";
+
 type AthleteRow = {
   athleteId: string;
   firstName: string;
@@ -28,6 +30,15 @@ function getErrorMessage(data: unknown, fallback: string) {
 }
 
 export default function CoachAthletesPage() {
+  
+  const [forbidden, setForbidden] = useState<string | null>(null);
+  const bannerText =
+    forbidden === "athlete"
+      ? "Accesso negato: sei loggato come COACH. L’area Atleta è riservata agli atleti."
+      : forbidden === "coach"
+      ? "Accesso negato: sei loggato come ATHLETE. L’area Coach è riservata ai coach."
+      : null;
+
   const [loading, setLoading] = useState(true);
   const [list, setList] = useState<AthleteRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -68,19 +79,22 @@ export default function CoachAthletesPage() {
         .map((x) => {
           if (typeof x !== "object" || x === null) return null;
           const o = x as Record<string, unknown>;
+
           const athleteId = asString(o.athleteId);
           const firstName = asString(o.firstName);
           const lastName = asString(o.lastName);
+
           const notesPublic =
             typeof o.notesPublic === "string" || o.notesPublic === null
               ? (o.notesPublic as string | null)
               : null;
 
-          if (!athleteId || !firstName || !lastName) return null;
           const activatedAt =
-  typeof o.activatedAt === "string" || o.activatedAt === null
-    ? (o.activatedAt as string | null)
-    : null;
+            typeof o.activatedAt === "string" || o.activatedAt === null
+              ? (o.activatedAt as string | null)
+              : null;
+
+          if (!athleteId || !firstName || !lastName) return null;
 
           return { athleteId, firstName, lastName, notesPublic, activatedAt };
         })
@@ -96,24 +110,24 @@ export default function CoachAthletesPage() {
   }
 
   useEffect(() => {
-    loadAthletes();
-  }, []);
+  loadAthletes();
+  setForbidden(new URLSearchParams(window.location.search).get("forbidden"));
+}, []);
 
   async function createAthlete() {
     setCreating(true);
     setError(null);
 
     try {
-      // ✅ FIX: l’API vuole camelCase (firstName/lastName/notesPublic)
       const r = await fetch("/api/coach/athletes", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    firstName: firstName.trim(),
-    lastName: lastName.trim(),
-    notesPublic: notesPublic.trim() || null,
-  }),
-});
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          notesPublic: notesPublic.trim() || null,
+        }),
+      });
 
       const data: unknown = await r.json().catch(() => ({}));
 
@@ -122,11 +136,9 @@ export default function CoachAthletesPage() {
         return;
       }
 
-      // reset form
       setFirstName("");
       setLastName("");
       setNotesPublic("");
-
       await loadAthletes();
     } finally {
       setCreating(false);
@@ -191,6 +203,9 @@ export default function CoachAthletesPage() {
     <main style={{ maxWidth: 980, margin: "36px auto", padding: 16 }}>
       <section>
         <h1 style={{ fontSize: 28, fontWeight: 900 }}>Area Coach — Atleti</h1>
+
+        <ForbiddenBanner text={bannerText} />
+
         <p style={{ opacity: 0.8, marginTop: 6 }}>
           Crea atleti e genera inviti one-time (link).
         </p>
@@ -282,7 +297,6 @@ export default function CoachAthletesPage() {
               const invErr = inviteErrByAthleteId[a.athleteId];
               const invLoading = inviteLoadingId === a.athleteId;
               const isActive = !!a.activatedAt;
-              
 
               return (
                 <div
@@ -296,64 +310,64 @@ export default function CoachAthletesPage() {
                   }}
                 >
                   <div
-  style={{
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-  }}
->
-  <div style={{ minWidth: 0 }}>
-    <div style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 900 }}>
-      <span>
-        {a.firstName} {a.lastName}
-      </span>
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 900 }}>
+                        <span>
+                          {a.firstName} {a.lastName}
+                        </span>
 
-      <span
-        style={{
-          fontSize: 12,
-          fontWeight: 900,
-          padding: "4px 8px",
-          borderRadius: 999,
-          border: "1px solid #ddd",
-          opacity: 0.9,
-        }}
-      >
-        {a.activatedAt ? "ATTIVO" : "NON ATTIVO"}
-      </span>
-    </div>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 900,
+                            padding: "4px 8px",
+                            borderRadius: 999,
+                            border: "1px solid #ddd",
+                            opacity: 0.9,
+                          }}
+                        >
+                          {a.activatedAt ? "ATTIVO" : "NON ATTIVO"}
+                        </span>
+                      </div>
 
-    <div style={{ fontSize: 12, opacity: 0.75, wordBreak: "break-all" }}>
-      ID: <code>{a.athleteId}</code>
-    </div>
+                      <div style={{ fontSize: 12, opacity: 0.75, wordBreak: "break-all" }}>
+                        ID: <code>{a.athleteId}</code>
+                      </div>
 
-    {a.notesPublic ? (
-      <div style={{ marginTop: 6, fontSize: 13, opacity: 0.85 }}>
-        Note: <span>{a.notesPublic}</span>
-      </div>
-    ) : null}
-  </div>
+                      {a.notesPublic ? (
+                        <div style={{ marginTop: 6, fontSize: 13, opacity: 0.85 }}>
+                          Note: <span>{a.notesPublic}</span>
+                        </div>
+                      ) : null}
+                    </div>
 
-  <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
-    {!isActive ? (
-  <button
-    onClick={() => createInvite(a.athleteId)}
-    disabled={invLoading}
-    style={{
-      padding: "10px 12px",
-      borderRadius: 12,
-      border: "1px solid #333",
-      cursor: invLoading ? "not-allowed" : "pointer",
-      fontWeight: 900,
-    }}
-  >
-    {invLoading ? "Genero..." : "Crea invito"}
-  </button>
-) : null}
-  </div>
-</div>
+                    <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+                      {!isActive ? (
+                        <button
+                          onClick={() => createInvite(a.athleteId)}
+                          disabled={invLoading}
+                          style={{
+                            padding: "10px 12px",
+                            borderRadius: 12,
+                            border: "1px solid #333",
+                            cursor: invLoading ? "not-allowed" : "pointer",
+                            fontWeight: 900,
+                          }}
+                        >
+                          {invLoading ? "Genero..." : "Crea invito"}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
 
-                  {!isActive&&inv ? (
+                  {!isActive && inv ? (
                     <div
                       style={{
                         padding: 12,
