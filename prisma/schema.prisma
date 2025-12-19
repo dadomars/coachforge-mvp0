@@ -36,6 +36,8 @@ model Athlete {
   coach         Coach    @relation(fields: [coachId], references: [coachId], onDelete: Cascade)
   auth          AthleteAuth?
   invites       AthleteInvite[]
+  events        Event[]
+  competitions  Competition[]
 
   @@index([coachId], map: "idx_athlete_coach_id")
   @@map("athlete")
@@ -65,4 +67,44 @@ model AthleteInvite {
 
   @@index([athleteId], map: "idx_invite_athlete_id")
   @@map("athlete_invite")
+}
+
+enum EventStatus {
+  PLANNED
+  DONE
+  CANCELLED
+}
+
+model Competition {
+  competitionId String      @id @default(cuid()) @map("competition_id")
+  athleteId     String      @map("athlete_id")
+  name          String      @map("name")
+  dateStart     DateTime    @map("date_start")
+  dateEnd       DateTime?   @map("date_end")
+  location      String?     @map("location")
+  notes         String      @map("notes")
+  status        EventStatus @map("status")
+  isTarget      Boolean     @default(false) @map("is_target")
+
+  athlete       Athlete     @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
+
+  @@index([athleteId], map: "idx_competition_athlete_id")
+  @@map("competition")
+}
+
+model Event {
+  eventId    String      @id @default(cuid()) @map("event_id")
+  athleteId  String      @map("athlete_id")
+  name       String      @map("name")
+  dateStart  DateTime    @map("date_start")
+  dateEnd    DateTime?   @map("date_end")
+  location   String?     @map("location")
+  notes      String      @map("notes")
+  status     EventStatus @map("status")
+  typeLabel  String      @map("type_label")
+
+  athlete    Athlete     @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
+
+  @@index([athleteId], map: "idx_event_athlete_id")
+  @@map("event")
 }
