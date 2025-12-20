@@ -348,11 +348,25 @@ export default function CoachAthletesPage() {
                       ) : null}
                     </div>
 
-                    <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
-                      {!isActive ? (
-                        <button
-                          onClick={() => createInvite(a.athleteId)}
-                          disabled={invLoading}
+                  <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+                    <a
+                      href={`/coach/athletes/${a.athleteId}`}
+                      style={{
+                        padding: "10px 12px",
+                        borderRadius: 12,
+                        border: "1px solid #ddd",
+                        textDecoration: "none",
+                        fontWeight: 900,
+                        display: "inline-flex",
+                        alignItems: "center",
+                      }}
+                    >
+                      Apri scheda
+                    </a>
+                    {!isActive ? (
+                      <button
+                        onClick={() => createInvite(a.athleteId)}
+                        disabled={invLoading}
                           style={{
                             padding: "10px 12px",
                             borderRadius: 12,
