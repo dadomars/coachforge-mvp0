@@ -1,22 +1,25 @@
 'use client';
 
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+
 function asString(v: unknown): string {
-  return typeof v === "string" ? v : v == null ? "" : String(v);
+  return typeof v === 'string' ? v : v == null ? '' : String(v);
 }
 
 function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message;
 
-  if (e && typeof e === "object") {
+  if (e && typeof e === 'object') {
     const rec = e as Record<string, unknown>;
-    const msg = rec["message"];
-    if (typeof msg === "string" && msg.trim()) return msg;
+    const msg = rec['message'];
+    if (typeof msg === 'string' && msg.trim()) return msg;
   }
 
-  return "Errore sconosciuto";
+  return 'Errore sconosciuto';
 }
+
 type AthleteRow = {
   athleteId: string;
   firstName: string;
@@ -25,12 +28,11 @@ type AthleteRow = {
   activatedAt?: string | null;
 };
 
-export default function AthleteDetailPage({
-  params,
-}: {
-  params: { athleteId: string };
-}) {
-  const athleteId = params.athleteId;
+export default function AthleteDetailPage() {
+  const params = useParams<{ athleteId: string | string[] }>();
+  const athleteId = Array.isArray(params.athleteId)
+    ? params.athleteId[0]
+    : params.athleteId;
 
   const [list, setList] = useState<AthleteRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,33 +59,35 @@ export default function AthleteDetailPage({
         if (!Array.isArray(arr)) throw new Error('Risposta atleti non valida.');
 
         const normalized: AthleteRow[] = arr
-  .map((o: unknown) => {
-    const rec =
-      o && typeof o === "object" ? (o as Record<string, unknown>) : {};
+          .map((o: unknown) => {
+            const rec =
+              o && typeof o === 'object'
+                ? (o as Record<string, unknown>)
+                : {};
 
-    const athleteId = asString(rec["athleteId"]);
-    const firstName = asString(rec["firstName"]);
-    const lastName = asString(rec["lastName"]);
+            const athleteId = asString(rec['athleteId']);
+            const firstName = asString(rec['firstName']);
+            const lastName = asString(rec['lastName']);
 
-    if (!athleteId || !firstName || !lastName) return null;
+            if (!athleteId || !firstName || !lastName) return null;
 
-    const notesPublic = asString(rec["notesPublic"]);
-    const activatedAt = asString(rec["activatedAt"]);
+            const notesPublic = asString(rec['notesPublic']);
+            const activatedAt = asString(rec['activatedAt']);
 
-    return {
-      athleteId,
-      firstName,
-      lastName,
-      notesPublic: notesPublic || null,
-      activatedAt: activatedAt || null,
-    };
-  })
-  .filter(Boolean) as AthleteRow[];
+            return {
+              athleteId,
+              firstName,
+              lastName,
+              notesPublic: notesPublic || null,
+              activatedAt: activatedAt || null,
+            };
+          })
+          .filter(Boolean) as AthleteRow[];
 
         if (alive) setList(normalized);
       } catch (e: unknown) {
-  setErr(errorMessage(e));
-} finally {
+        setErr(errorMessage(e));
+      } finally {
         if (alive) setLoading(false);
       }
     }
@@ -120,8 +124,7 @@ export default function AthleteDetailPage({
               <strong>Nome:</strong> {athlete.firstName} {athlete.lastName}
             </div>
             <div>
-              <strong>Stato:</strong>{' '}
-              {athlete.activatedAt ? 'ATTIVO' : 'NON ATTIVO'}
+              <strong>Stato:</strong> {athlete.activatedAt ? 'ATTIVO' : 'NON ATTIVO'}
             </div>
             <div>
               <strong>ID:</strong> <code>{athlete.athleteId}</code>
@@ -136,7 +139,9 @@ export default function AthleteDetailPage({
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 10 }}>
         <h2 style={{ margin: 0 }}>Gare</h2>
-        <p style={{ marginTop: 8 }}>In arrivo: lista + aggiungi/modifica/elimina + “gara obiettivo”.</p>
+        <p style={{ marginTop: 8 }}>
+          In arrivo: lista + aggiungi/modifica/elimina + “gara obiettivo”.
+        </p>
       </section>
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 10 }}>
