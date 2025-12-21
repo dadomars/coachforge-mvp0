@@ -850,54 +850,59 @@ export default function AthleteDetailPage() {
             <p style={{ marginTop: 8 }}>Nessun evento assegnato.</p>
           ) : null}
 
-          <div style={{ marginTop: 8, display: 'grid', gap: 8 }}>
-            {eventAssignments.map((assignment) => {
-              const ev = events.find((e) => e.eventId === assignment.eventId);
-              const startLabel = ev ? toDateInputValue(ev.dateStart) : '';
-              const endLabel = ev ? toDateInputValue(ev.dateEnd) : '';
-              const dateLabel =
-                ev && endLabel ? `${startLabel} - ${endLabel}` : startLabel;
-              const busy = eventRowBusyId === assignment.assignmentId;
-              return (
-                <div
-                  key={assignment.assignmentId}
-                  style={{
-                    padding: 8,
-                    borderRadius: 8,
-                    border: '1px solid #eee',
-                    display: 'grid',
-                    gap: 4,
-                  }}
-                >
-                  <div>
-                    <strong>{ev?.name ?? 'Evento non trovato'}</strong>
-                  </div>
-                  <div>Data: {dateLabel || 'N/D'}</div>
-                  <div>Tipo: {ev?.typeLabel ?? 'N/D'}</div>
-                  <div>
-                    Stato: {ev ? EVENT_STATUS_LABELS[ev.status] : 'N/D'}
-                  </div>
-                  {ev?.location ? <div>Luogo: {ev.location}</div> : null}
-                  {ev?.link ? (
-                    <div>
-                      Link:{' '}
-                      <a href={ev.link} target="_blank" rel="noreferrer">
-                        {ev.link}
-                      </a>
-                    </div>
-                  ) : null}
-                  <div>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => handleRemoveEventAssignment(assignment.assignmentId)}
-                    >
-                      Rimuovi
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+          <div style={{ marginTop: 8, overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                    Nome
+                  </th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                    Tipo
+                  </th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                    Data
+                  </th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                    Stato
+                  </th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                    Azioni
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {eventAssignments.map((assignment) => {
+                  const ev = events.find((e) => e.eventId === assignment.eventId);
+                  const startLabel = ev ? toDateInputValue(ev.dateStart) : '';
+                  const endLabel = ev ? toDateInputValue(ev.dateEnd) : '';
+                  const dateLabel =
+                    ev && endLabel ? `${startLabel} - ${endLabel}` : startLabel;
+                  const busy = eventRowBusyId === assignment.assignmentId;
+                  return (
+                    <tr key={assignment.assignmentId}>
+                      <td style={{ padding: '6px 4px' }}>
+                        {ev?.name ?? 'Evento non trovato'}
+                      </td>
+                      <td style={{ padding: '6px 4px' }}>{ev?.typeLabel ?? 'N/D'}</td>
+                      <td style={{ padding: '6px 4px' }}>{dateLabel || 'N/D'}</td>
+                      <td style={{ padding: '6px 4px' }}>
+                        {ev ? EVENT_STATUS_LABELS[ev.status] : 'N/D'}
+                      </td>
+                      <td style={{ padding: '6px 4px' }}>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => handleRemoveEventAssignment(assignment.assignmentId)}
+                        >
+                          Rimuovi
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
