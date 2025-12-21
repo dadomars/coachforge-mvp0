@@ -67,6 +67,33 @@ type CompetitionAssignmentRow = {
   competition: CompetitionLibraryRow;
 };
 
+type EventStatus = 'PLANNED' | 'DONE' | 'CANCELLED';
+
+const EVENT_STATUS_LABELS: Record<EventStatus, string> = {
+  PLANNED: 'Pianificato',
+  DONE: 'Fatto',
+  CANCELLED: 'Annullato',
+};
+
+type EventLibraryRow = {
+  eventId: string;
+  name: string;
+  dateStart: string;
+  dateEnd?: string | null;
+  location?: string | null;
+  link?: string | null;
+  notesPublic: string;
+  notesPrivate: string;
+  status: EventStatus;
+  typeLabel: string;
+};
+
+type EventAssignmentRow = {
+  assignmentId: string;
+  eventId: string;
+  assignedAt: string;
+};
+
 function normalizeCompetition(value: unknown): CompetitionLibraryRow | null {
   if (!value || typeof value !== 'object') return null;
   const rec = value as Record<string, unknown>;
@@ -111,6 +138,42 @@ function normalizeAssignment(value: unknown): CompetitionAssignmentRow | null {
     competition,
   };
 }
+
+function normalizeEvent(value: unknown): EventLibraryRow | null {
+  if (!value || typeof value !== 'object') return null;
+  const rec = value as Record<string, unknown>;
+  const eventId = asString(rec['eventId']);
+  const name = asString(rec['name']);
+  const dateStart = asString(rec['dateStart']);
+  const status = asString(rec['status']);
+  const typeLabel = asString(rec['typeLabel']);
+
+  if (!eventId || !name || !dateStart) return null;
+  if (!['PLANNED', 'DONE', 'CANCELLED'].includes(status)) return null;
+
+  return {
+    eventId,
+    name,
+    dateStart,
+    dateEnd: asString(rec['dateEnd']) || null,
+    location: asString(rec['location']) || null,
+    link: asString(rec['link']) || null,
+    notesPublic: asString(rec['notesPublic']),
+    notesPrivate: asString(rec['notesPrivate']),
+    status: status as EventStatus,
+    typeLabel: typeLabel || 'ALTRO',
+  };
+}
+
+function normalizeEventAssignment(value: unknown): EventAssignmentRow | null {
+  if (!value || typeof value !== 'object') return null;
+  const rec = value as Record<string, unknown>;
+  const assignmentId = asString(rec['assignmentId']) || asString(rec['id']);
+  const eventId = asString(rec['eventId']);
+  const assignedAt = asString(rec['assignedAt']);
+  if (!assignmentId || !eventId || !assignedAt) return null;
+  return { assignmentId, eventId, assignedAt };
+}
 export default function AthleteDetailPage() {
   const params = useParams<{ athleteId: string | string[] }>();
   const athleteId = Array.isArray(params.athleteId)
@@ -137,6 +200,17 @@ export default function AthleteDetailPage() {
 
   const [rowBusyId, setRowBusyId] = useState<string | null>(null);
   const [rowErr, setRowErr] = useState<string>('');
+
+  const [events, setEvents] = useState<EventLibraryRow[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventsErr, setEventsErr] = useState<string>('');
+  const [eventAssignments, setEventAssignments] = useState<EventAssignmentRow[]>([]);
+  const [eventAssignmentsLoading, setEventAssignmentsLoading] = useState(false);
+  const [eventAssignmentsErr, setEventAssignmentsErr] = useState<string>('');
+  const [eventAssignId, setEventAssignId] = useState('');
+  const [eventAssignErr, setEventAssignErr] = useState<string>('');
+  const [eventAssignBusy, setEventAssignBusy] = useState(false);
+  const [eventRowBusyId, setEventRowBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -279,6 +353,77 @@ export default function AthleteDetailPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+
+    async function loadEvents() {
+      setEventsLoading(true);
+      setEventsErr('');
+      try {
+        const r = await fetch('/api/coach/events', { cache: 'no-store' });
+        const data = await r.json().catch(() => null);
+        if (!r.ok) {
+          const msg =
+            (data && (data.error || data.message)) ||
+            `Errore caricamento eventi (${r.status})`;
+          throw new Error(msg);
+        }
+        if (!Array.isArray(data)) throw new Error('Risposta eventi non valida.');
+        const normalized = data
+          .map((row: unknown) => normalizeEvent(row))
+          .filter(Boolean) as EventLibraryRow[];
+        if (alive) setEvents(normalized);
+      } catch (e: unknown) {
+        if (alive) setEventsErr(errorMessage(e));
+      } finally {
+        if (alive) setEventsLoading(false);
+      }
+    }
+
+    loadEvents();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadEventAssignments() {
+      if (!athleteId) return;
+      setEventAssignmentsLoading(true);
+      setEventAssignmentsErr('');
+      try {
+        const r = await fetch(
+          `/api/coach/athletes/${athleteId}/event-assignments`,
+          { cache: 'no-store' }
+        );
+        const data = await r.json().catch(() => null);
+        if (!r.ok) {
+          const msg =
+            (data && (data.error || data.message)) ||
+            `Errore caricamento eventi assegnati (${r.status})`;
+          throw new Error(msg);
+        }
+        if (!Array.isArray(data))
+          throw new Error('Risposta eventi assegnati non valida.');
+        const normalized = data
+          .map((row: unknown) => normalizeEventAssignment(row))
+          .filter(Boolean) as EventAssignmentRow[];
+        if (alive) setEventAssignments(normalized);
+      } catch (e: unknown) {
+        if (alive) setEventAssignmentsErr(errorMessage(e));
+      } finally {
+        if (alive) setEventAssignmentsLoading(false);
+      }
+    }
+
+    loadEventAssignments();
+    return () => {
+      alive = false;
+    };
+  }, [athleteId]);
+
   async function reloadAssignments() {
     if (!athleteId) return;
     setAssignmentsLoading(true);
@@ -305,6 +450,35 @@ export default function AthleteDetailPage() {
       setAssignmentsErr(errorMessage(e));
     } finally {
       setAssignmentsLoading(false);
+    }
+  }
+
+  async function reloadEventAssignments() {
+    if (!athleteId) return;
+    setEventAssignmentsLoading(true);
+    setEventAssignmentsErr('');
+    try {
+      const r = await fetch(
+        `/api/coach/athletes/${athleteId}/event-assignments`,
+        { cache: 'no-store' }
+      );
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        const msg =
+          (data && (data.error || data.message)) ||
+          `Errore caricamento eventi assegnati (${r.status})`;
+        throw new Error(msg);
+      }
+      if (!Array.isArray(data))
+        throw new Error('Risposta eventi assegnati non valida.');
+      const normalized = data
+        .map((row: unknown) => normalizeEventAssignment(row))
+        .filter(Boolean) as EventAssignmentRow[];
+      setEventAssignments(normalized);
+    } catch (e: unknown) {
+      setEventAssignmentsErr(errorMessage(e));
+    } finally {
+      setEventAssignmentsLoading(false);
     }
   }
 
@@ -398,6 +572,64 @@ export default function AthleteDetailPage() {
       setRowErr(errorMessage(e));
     } finally {
       setRowBusyId(null);
+    }
+  }
+
+  async function handleAssignEvent(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setEventAssignErr('');
+    if (!eventAssignId) {
+      setEventAssignErr('Seleziona un evento.');
+      return;
+    }
+
+    setEventAssignBusy(true);
+    try {
+      const r = await fetch(
+        `/api/coach/athletes/${athleteId}/event-assignments`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId: eventAssignId }),
+        }
+      );
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        const msg =
+          (data && (data.error || data.message)) ||
+          `Errore assegnazione evento (${r.status})`;
+        throw new Error(msg);
+      }
+      setEventAssignId('');
+      await reloadEventAssignments();
+    } catch (e: unknown) {
+      setEventAssignErr(errorMessage(e));
+    } finally {
+      setEventAssignBusy(false);
+    }
+  }
+
+  async function handleRemoveEventAssignment(assignmentId: string) {
+    if (!confirm('Rimuovere questo evento?')) return;
+    setEventAssignmentsErr('');
+    setEventRowBusyId(assignmentId);
+    try {
+      const r = await fetch(
+        `/api/coach/athletes/${athleteId}/event-assignments/${assignmentId}`,
+        { method: 'DELETE' }
+      );
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        const msg =
+          (data && (data.error || data.message)) ||
+          `Errore rimozione evento (${r.status})`;
+        throw new Error(msg);
+      }
+      await reloadEventAssignments();
+    } catch (e: unknown) {
+      setEventAssignmentsErr(errorMessage(e));
+    } finally {
+      setEventRowBusyId(null);
     }
   }
 
@@ -579,7 +811,95 @@ export default function AthleteDetailPage() {
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 10 }}>
         <h2 style={{ margin: 0 }}>Eventi</h2>
-        <p style={{ marginTop: 8 }}>In arrivo: lista + aggiungi/modifica/elimina.</p>
+
+        <div style={{ marginTop: 8 }}>
+          <form onSubmit={handleAssignEvent} style={{ display: 'grid', gap: 8 }}>
+            <label>
+              Assegna evento
+              <select
+                value={eventAssignId}
+                disabled={eventsLoading}
+                onChange={(e) => setEventAssignId(e.target.value)}
+              >
+                <option value="">Seleziona evento</option>
+                {events.map((ev) => (
+                  <option key={ev.eventId} value={ev.eventId}>
+                    {ev.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="submit" disabled={eventAssignBusy || eventsLoading}>
+                Assegna
+              </button>
+            </div>
+            {eventsLoading ? <p>Caricamento eventi...</p> : null}
+            {eventsErr ? <p>Errore: {eventsErr}</p> : null}
+            {eventAssignErr ? <p>Errore: {eventAssignErr}</p> : null}
+          </form>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <h3 style={{ margin: 0 }}>Eventi assegnati</h3>
+          {eventAssignmentsLoading ? (
+            <p style={{ marginTop: 8 }}>Caricamento eventi assegnati...</p>
+          ) : eventAssignmentsErr ? (
+            <p style={{ marginTop: 8 }}>Errore: {eventAssignmentsErr}</p>
+          ) : eventAssignments.length === 0 ? (
+            <p style={{ marginTop: 8 }}>Nessun evento assegnato.</p>
+          ) : null}
+
+          <div style={{ marginTop: 8, display: 'grid', gap: 8 }}>
+            {eventAssignments.map((assignment) => {
+              const ev = events.find((e) => e.eventId === assignment.eventId);
+              const startLabel = ev ? toDateInputValue(ev.dateStart) : '';
+              const endLabel = ev ? toDateInputValue(ev.dateEnd) : '';
+              const dateLabel =
+                ev && endLabel ? `${startLabel} - ${endLabel}` : startLabel;
+              const busy = eventRowBusyId === assignment.assignmentId;
+              return (
+                <div
+                  key={assignment.assignmentId}
+                  style={{
+                    padding: 8,
+                    borderRadius: 8,
+                    border: '1px solid #eee',
+                    display: 'grid',
+                    gap: 4,
+                  }}
+                >
+                  <div>
+                    <strong>{ev?.name ?? 'Evento non trovato'}</strong>
+                  </div>
+                  <div>Data: {dateLabel || 'N/D'}</div>
+                  <div>Tipo: {ev?.typeLabel ?? 'N/D'}</div>
+                  <div>
+                    Stato: {ev ? EVENT_STATUS_LABELS[ev.status] : 'N/D'}
+                  </div>
+                  {ev?.location ? <div>Luogo: {ev.location}</div> : null}
+                  {ev?.link ? (
+                    <div>
+                      Link:{' '}
+                      <a href={ev.link} target="_blank" rel="noreferrer">
+                        {ev.link}
+                      </a>
+                    </div>
+                  ) : null}
+                  <div>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleRemoveEventAssignment(assignment.assignmentId)}
+                    >
+                      Rimuovi
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </section>
     </main>
   );
