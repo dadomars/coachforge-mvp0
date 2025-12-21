@@ -111,7 +111,7 @@ model Competition {
 
 model Event {
   eventId    String      @id @default(cuid()) @map("event_id")
-  athleteId  String      @map("athlete_id")
+  athleteId  String?     @map("athlete_id")
   coachId    String?     @map("coach_id")
   name       String      @map("name")
   dateStart  DateTime    @map("date_start")
@@ -123,7 +123,7 @@ model Event {
   typeLabel  String      @map("type_label")
   link       String?     @map("link")
 
-  athlete    Athlete     @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
+  athlete    Athlete?    @relation(fields: [athleteId], references: [athleteId], onDelete: SetNull)
   coach      Coach?      @relation(fields: [coachId], references: [coachId], onDelete: SetNull)
   assignments EventAssignment[]
 
