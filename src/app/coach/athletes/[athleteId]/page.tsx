@@ -3,6 +3,11 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Fragment, useEffect, useMemo, useState, type FormEvent } from 'react';
+import {
+  formatStatusItUpper,
+  formatTypeUpper,
+  titleCaseIt,
+} from '@/lib/ui/formatters';
 
 function asString(v: unknown): string {
   return typeof v === 'string' ? v : v == null ? '' : String(v);
@@ -39,12 +44,6 @@ type AthleteRow = {
 const COMPETITION_STATUSES = ['PLANNED', 'DONE', 'CANCELLED'] as const;
 type CompetitionStatus = (typeof COMPETITION_STATUSES)[number];
 
-const COMPETITION_STATUS_LABELS: Record<CompetitionStatus, string> = {
-  PLANNED: 'Pianificata',
-  DONE: 'Completata',
-  CANCELLED: 'Annullata',
-};
-
 type CompetitionType = 'HYROX' | 'CROSSFIT' | 'RUN' | 'ALTRO';
 
 type CompetitionLibraryRow = {
@@ -68,12 +67,6 @@ type CompetitionAssignmentRow = {
 };
 
 type EventStatus = 'PLANNED' | 'DONE' | 'CANCELLED';
-
-const EVENT_STATUS_LABELS: Record<EventStatus, string> = {
-  PLANNED: 'Pianificato',
-  DONE: 'Fatto',
-  CANCELLED: 'Annullato',
-};
 
 type EventLibraryRow = {
   eventId: string;
@@ -714,15 +707,16 @@ export default function AthleteDetailPage() {
                 const startLabel = toDateInputValue(c.dateStart);
                 const endLabel = toDateInputValue(c.dateEnd);
                 const dateLabel = endLabel ? `${startLabel} - ${endLabel}` : startLabel;
-                const statusLabel = COMPETITION_STATUS_LABELS[c.status];
                 const busy = rowBusyId === assignment.assignmentId;
                 return (
                   <Fragment key={assignment.assignmentId}>
                     <tr>
-                      <td style={{ padding: '6px 4px' }}>{c.name}</td>
-                      <td style={{ padding: '6px 4px' }}>{c.type}</td>
+                      <td style={{ padding: '6px 4px' }}>{titleCaseIt(c.name)}</td>
+                      <td style={{ padding: '6px 4px' }}>{formatTypeUpper(c.type)}</td>
                       <td style={{ padding: '6px 4px' }}>{dateLabel}</td>
-                      <td style={{ padding: '6px 4px' }}>{statusLabel}</td>
+                      <td style={{ padding: '6px 4px' }}>
+                        {formatStatusItUpper(c.status)}
+                      </td>
                       <td style={{ padding: '6px 4px' }}>{assignment.isTarget ? 'SI' : '-'}</td>
                       <td style={{ padding: '6px 4px', display: 'flex', gap: 8 }}>
                         <button
@@ -882,12 +876,14 @@ export default function AthleteDetailPage() {
                   return (
                     <tr key={assignment.assignmentId}>
                       <td style={{ padding: '6px 4px' }}>
-                        {ev?.name ?? 'Evento non trovato'}
+                        {ev ? titleCaseIt(ev.name) : 'Evento non trovato'}
                       </td>
-                      <td style={{ padding: '6px 4px' }}>{ev?.typeLabel ?? 'N/D'}</td>
+                      <td style={{ padding: '6px 4px' }}>
+                        {ev ? formatTypeUpper(ev.typeLabel) : 'N/D'}
+                      </td>
                       <td style={{ padding: '6px 4px' }}>{dateLabel || 'N/D'}</td>
                       <td style={{ padding: '6px 4px' }}>
-                        {ev ? EVENT_STATUS_LABELS[ev.status] : 'N/D'}
+                        {ev ? formatStatusItUpper(ev.status) : 'N/D'}
                       </td>
                       <td style={{ padding: '6px 4px' }}>
                         <button

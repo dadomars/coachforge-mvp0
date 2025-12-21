@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import ForbiddenBanner from "@/components/ForbiddenBanner";
+import {
+  formatStatusItUpper,
+  formatTypeUpper,
+  titleCaseIt,
+} from "@/lib/ui/formatters";
 
 type EventStatus = "PLANNED" | "DONE" | "CANCELLED";
 
@@ -35,12 +40,6 @@ type AthleteRow = {
   athleteId: string;
   firstName: string;
   lastName: string;
-};
-
-const STATUS_LABELS: Record<EventStatus, string> = {
-  PLANNED: "PIANIFICATO",
-  DONE: "FATTO",
-  CANCELLED: "ANNULLATO",
 };
 
 function asString(value: unknown): string {
@@ -482,10 +481,14 @@ export default function CoachEventsPage() {
                 const busy = rowBusyId === ev.eventId;
                 return (
                   <tr key={ev.eventId}>
-                    <td style={{ padding: "6px 4px" }}>{ev.name}</td>
-                    <td style={{ padding: "6px 4px" }}>{ev.typeLabel}</td>
+                    <td style={{ padding: "6px 4px" }}>{titleCaseIt(ev.name)}</td>
+                    <td style={{ padding: "6px 4px" }}>
+                      {formatTypeUpper(ev.typeLabel)}
+                    </td>
                     <td style={{ padding: "6px 4px" }}>{dateLabel}</td>
-                    <td style={{ padding: "6px 4px" }}>{STATUS_LABELS[ev.status]}</td>
+                    <td style={{ padding: "6px 4px" }}>
+                      {formatStatusItUpper(ev.status)}
+                    </td>
                     <td style={{ padding: "6px 4px", display: "flex", gap: 8 }}>
                       {editId === ev.eventId ? (
                         <>
