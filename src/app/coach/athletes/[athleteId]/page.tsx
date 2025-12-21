@@ -16,12 +16,6 @@ function toDateInputValue(v: string | null | undefined): string {
   return typeof v === 'string' && v.length >= 10 ? v.slice(0, 10) : '';
 }
 
-function parseDateInputValue(value: string): Date | null {
-  if (!value) return null;
-  const parsed = new Date(`${value}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
 function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message;
 
@@ -42,15 +36,19 @@ type AthleteRow = {
   activatedAt?: string | null;
 };
 
-const COMPETITION_TYPES = ['HYROX', 'CROSSFIT', 'RUN', 'ALTRO'] as const;
-type CompetitionType = (typeof COMPETITION_TYPES)[number];
-
 const COMPETITION_STATUSES = ['PLANNED', 'DONE', 'CANCELLED'] as const;
 type CompetitionStatus = (typeof COMPETITION_STATUSES)[number];
 
-type CompetitionRow = {
+const COMPETITION_STATUS_LABELS: Record<CompetitionStatus, string> = {
+  PLANNED: 'Pianificata',
+  DONE: 'Completata',
+  CANCELLED: 'Annullata',
+};
+
+type CompetitionType = 'HYROX' | 'CROSSFIT' | 'RUN' | 'ALTRO';
+
+type CompetitionLibraryRow = {
   competitionId: string;
-  athleteId: string;
   name: string;
   dateStart: string;
   dateEnd?: string | null;
@@ -60,55 +58,31 @@ type CompetitionRow = {
   notesPrivate: string;
   status: CompetitionStatus;
   type: CompetitionType;
-  isTarget: boolean;
 };
 
-type CompetitionForm = {
-  name: string;
-  type: CompetitionType;
-  dateStart: string;
-  dateEnd: string;
-  location: string;
-  link: string;
-  status: CompetitionStatus;
-  notesPublic: string;
-  notesPrivate: string;
+type CompetitionAssignmentRow = {
+  assignmentId: string;
   isTarget: boolean;
+  assignedAt: string;
+  competition: CompetitionLibraryRow;
 };
 
-function createEmptyCompetitionForm(): CompetitionForm {
-  return {
-    name: '',
-    type: 'ALTRO',
-    dateStart: '',
-    dateEnd: '',
-    location: '',
-    link: '',
-    status: 'PLANNED',
-    notesPublic: '',
-    notesPrivate: '',
-    isTarget: false,
-  };
-}
-
-function normalizeCompetition(value: unknown): CompetitionRow | null {
+function normalizeCompetition(value: unknown): CompetitionLibraryRow | null {
   if (!value || typeof value !== 'object') return null;
   const rec = value as Record<string, unknown>;
 
   const competitionId = asString(rec['competitionId']);
-  const athleteId = asString(rec['athleteId']);
   const name = asString(rec['name']);
   const dateStart = asString(rec['dateStart']);
   const status = asString(rec['status']);
   const type = asString(rec['type']);
 
-  if (!competitionId || !athleteId || !name || !dateStart) return null;
+  if (!competitionId || !name || !dateStart) return null;
   if (!COMPETITION_STATUSES.includes(status as CompetitionStatus)) return null;
-  if (!COMPETITION_TYPES.includes(type as CompetitionType)) return null;
+  if (!['HYROX', 'CROSSFIT', 'RUN', 'ALTRO'].includes(type)) return null;
 
   return {
     competitionId,
-    athleteId,
     name,
     dateStart,
     dateEnd: asString(rec['dateEnd']) || null,
@@ -118,10 +92,25 @@ function normalizeCompetition(value: unknown): CompetitionRow | null {
     notesPrivate: asString(rec['notesPrivate']),
     status: status as CompetitionStatus,
     type: type as CompetitionType,
-    isTarget: asBool(rec['isTarget']),
   };
 }
 
+function normalizeAssignment(value: unknown): CompetitionAssignmentRow | null {
+  if (!value || typeof value !== 'object') return null;
+  const rec = value as Record<string, unknown>;
+  const assignmentId = asString(rec['id']) || asString(rec['assignmentId']);
+  const assignedAt = asString(rec['assignedAt']);
+  const competition = normalizeCompetition(rec['competition']);
+
+  if (!assignmentId || !assignedAt || !competition) return null;
+
+  return {
+    assignmentId,
+    isTarget: asBool(rec['isTarget']),
+    assignedAt,
+    competition,
+  };
+}
 export default function AthleteDetailPage() {
   const params = useParams<{ athleteId: string | string[] }>();
   const athleteId = Array.isArray(params.athleteId)
@@ -132,17 +121,20 @@ export default function AthleteDetailPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string>('');
 
-  const [competitions, setCompetitions] = useState<CompetitionRow[]>([]);
-  const [competitionsLoading, setCompetitionsLoading] = useState(false);
-  const [competitionsErr, setCompetitionsErr] = useState<string>('');
+  const [assignments, setAssignments] = useState<CompetitionAssignmentRow[]>([]);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+  const [assignmentsErr, setAssignmentsErr] = useState<string>('');
 
-  const [showNewForm, setShowNewForm] = useState(false);
-  const [newForm, setNewForm] = useState<CompetitionForm>(createEmptyCompetitionForm);
-  const [newFormErr, setNewFormErr] = useState<string>('');
-  const [newFormBusy, setNewFormBusy] = useState(false);
+  const [library, setLibrary] = useState<CompetitionLibraryRow[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryErr, setLibraryErr] = useState<string>('');
 
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<CompetitionForm>(createEmptyCompetitionForm);
+  const [showAssignForm, setShowAssignForm] = useState(false);
+  const [assignCompetitionId, setAssignCompetitionId] = useState('');
+  const [assignIsTarget, setAssignIsTarget] = useState(false);
+  const [assignErr, setAssignErr] = useState<string>('');
+  const [assignBusy, setAssignBusy] = useState(false);
+
   const [rowBusyId, setRowBusyId] = useState<string | null>(null);
   const [rowErr, setRowErr] = useState<string>('');
 
@@ -209,178 +201,132 @@ export default function AthleteDetailPage() {
   useEffect(() => {
     let alive = true;
 
-    async function loadCompetitions() {
+    async function loadAssignments() {
       if (!athleteId) return;
-      setCompetitionsLoading(true);
-      setCompetitionsErr('');
+      setAssignmentsLoading(true);
+      setAssignmentsErr('');
       try {
-        const r = await fetch(`/api/coach/athletes/${athleteId}/competitions`, {
-          cache: 'no-store',
-        });
+        const r = await fetch(
+          `/api/coach/athletes/${athleteId}/competition-assignments`,
+          { cache: 'no-store' }
+        );
         const data = await r.json().catch(() => null);
 
         if (!r.ok) {
           const msg =
             (data && (data.error || data.message)) ||
-            `Errore caricamento gare (${r.status})`;
+            `Errore caricamento assegnazioni (${r.status})`;
           throw new Error(msg);
         }
 
-        if (!Array.isArray(data)) throw new Error('Risposta gare non valida.');
+        if (!Array.isArray(data))
+          throw new Error('Risposta assegnazioni non valida.');
 
         const normalized = data
-          .map((row: unknown) => normalizeCompetition(row))
-          .filter(Boolean) as CompetitionRow[];
+          .map((row: unknown) => normalizeAssignment(row))
+          .filter(Boolean) as CompetitionAssignmentRow[];
 
-        if (alive) setCompetitions(normalized);
+        if (alive) setAssignments(normalized);
       } catch (e: unknown) {
-        if (alive) setCompetitionsErr(errorMessage(e));
+        if (alive) setAssignmentsErr(errorMessage(e));
       } finally {
-        if (alive) setCompetitionsLoading(false);
+        if (alive) setAssignmentsLoading(false);
       }
     }
 
-    loadCompetitions();
+    loadAssignments();
 
     return () => {
       alive = false;
     };
   }, [athleteId]);
 
-  async function reloadCompetitions() {
+  useEffect(() => {
+    let alive = true;
+
+    async function loadLibrary() {
+      setLibraryLoading(true);
+      setLibraryErr('');
+      try {
+        const r = await fetch('/api/coach/competitions', { cache: 'no-store' });
+        const data = await r.json().catch(() => null);
+
+        if (!r.ok) {
+          const msg =
+            (data && (data.error || data.message)) ||
+            `Errore caricamento libreria (${r.status})`;
+          throw new Error(msg);
+        }
+
+        if (!Array.isArray(data)) throw new Error('Risposta libreria non valida.');
+
+        const normalized = data
+          .map((row: unknown) => normalizeCompetition(row))
+          .filter(Boolean) as CompetitionLibraryRow[];
+
+        if (alive) setLibrary(normalized);
+      } catch (e: unknown) {
+        if (alive) setLibraryErr(errorMessage(e));
+      } finally {
+        if (alive) setLibraryLoading(false);
+      }
+    }
+
+    loadLibrary();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function reloadAssignments() {
     if (!athleteId) return;
-    setCompetitionsLoading(true);
-    setCompetitionsErr('');
+    setAssignmentsLoading(true);
+    setAssignmentsErr('');
     try {
-      const r = await fetch(`/api/coach/athletes/${athleteId}/competitions`, {
-        cache: 'no-store',
-      });
+      const r = await fetch(
+        `/api/coach/athletes/${athleteId}/competition-assignments`,
+        { cache: 'no-store' }
+      );
       const data = await r.json().catch(() => null);
       if (!r.ok) {
         const msg =
           (data && (data.error || data.message)) ||
-          `Errore caricamento gare (${r.status})`;
+          `Errore caricamento assegnazioni (${r.status})`;
         throw new Error(msg);
       }
-      if (!Array.isArray(data)) throw new Error('Risposta gare non valida.');
+      if (!Array.isArray(data))
+        throw new Error('Risposta assegnazioni non valida.');
       const normalized = data
-        .map((row: unknown) => normalizeCompetition(row))
-        .filter(Boolean) as CompetitionRow[];
-      setCompetitions(normalized);
+        .map((row: unknown) => normalizeAssignment(row))
+        .filter(Boolean) as CompetitionAssignmentRow[];
+      setAssignments(normalized);
     } catch (e: unknown) {
-      setCompetitionsErr(errorMessage(e));
+      setAssignmentsErr(errorMessage(e));
     } finally {
-      setCompetitionsLoading(false);
+      setAssignmentsLoading(false);
     }
   }
 
-  function validateCompetitionForm(form: CompetitionForm): string | null {
-    if (!form.name.trim()) return 'Nome obbligatorio.';
-    if (!form.dateStart) return 'Data inizio obbligatoria.';
-    const start = parseDateInputValue(form.dateStart);
-    if (!start) return 'Data inizio non valida.';
-    if (form.dateEnd) {
-      const end = parseDateInputValue(form.dateEnd);
-      if (!end) return 'Data fine non valida.';
-      if (end < start) return 'Data fine deve essere >= data inizio.';
-    }
-    return null;
-  }
-
-  async function handleAddCompetition(e: FormEvent<HTMLFormElement>) {
+  async function handleAssignCompetition(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setNewFormErr('');
-    const validationError = validateCompetitionForm(newForm);
-    if (validationError) {
-      setNewFormErr(validationError);
+    setAssignErr('');
+    if (!assignCompetitionId) {
+      setAssignErr('Seleziona una gara.');
       return;
     }
 
-    setNewFormBusy(true);
+    setAssignBusy(true);
     try {
       const payload = {
-        name: newForm.name.trim(),
-        type: newForm.type,
-        dateStart: newForm.dateStart,
-        dateEnd: newForm.dateEnd || null,
-        location: newForm.location.trim() || null,
-        link: newForm.link.trim() || null,
-        status: newForm.status,
-        notesPublic: newForm.notesPublic,
-        notesPrivate: newForm.notesPrivate,
-        isTarget: newForm.isTarget,
-      };
-
-      const r = await fetch(`/api/coach/athletes/${athleteId}/competitions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await r.json().catch(() => null);
-      if (!r.ok) {
-        const msg =
-          (data && (data.error || data.message)) ||
-          `Errore creazione gara (${r.status})`;
-        throw new Error(msg);
-      }
-
-      setNewForm(createEmptyCompetitionForm());
-      setShowNewForm(false);
-      await reloadCompetitions();
-    } catch (e: unknown) {
-      setNewFormErr(errorMessage(e));
-    } finally {
-      setNewFormBusy(false);
-    }
-  }
-
-  function startEdit(row: CompetitionRow) {
-    setEditId(row.competitionId);
-    setRowErr('');
-    setEditForm({
-      name: row.name,
-      type: row.type,
-      dateStart: toDateInputValue(row.dateStart),
-      dateEnd: toDateInputValue(row.dateEnd),
-      location: row.location ?? '',
-      link: row.link ?? '',
-      status: row.status,
-      notesPublic: row.notesPublic ?? '',
-      notesPrivate: row.notesPrivate ?? '',
-      isTarget: row.isTarget,
-    });
-  }
-
-  function cancelEdit() {
-    setEditId(null);
-  }
-
-  async function handleSaveCompetition(competitionId: string) {
-    setRowErr('');
-    const validationError = validateCompetitionForm(editForm);
-    if (validationError) {
-      setRowErr(validationError);
-      return;
-    }
-    setRowBusyId(competitionId);
-    try {
-      const payload = {
-        name: editForm.name.trim(),
-        type: editForm.type,
-        dateStart: editForm.dateStart,
-        dateEnd: editForm.dateEnd || '',
-        location: editForm.location.trim(),
-        link: editForm.link.trim(),
-        status: editForm.status,
-        notesPublic: editForm.notesPublic,
-        notesPrivate: editForm.notesPrivate,
-        isTarget: editForm.isTarget,
+        competitionId: assignCompetitionId,
+        isTarget: assignIsTarget,
       };
 
       const r = await fetch(
-        `/api/coach/athletes/${athleteId}/competitions/${competitionId}`,
+        `/api/coach/athletes/${athleteId}/competition-assignments`,
         {
-          method: 'PATCH',
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         }
@@ -389,48 +335,27 @@ export default function AthleteDetailPage() {
       if (!r.ok) {
         const msg =
           (data && (data.error || data.message)) ||
-          `Errore aggiornamento gara (${r.status})`;
+          `Errore assegnazione gara (${r.status})`;
         throw new Error(msg);
       }
-      setEditId(null);
-      await reloadCompetitions();
+
+      setAssignCompetitionId('');
+      setAssignIsTarget(false);
+      setShowAssignForm(false);
+      await reloadAssignments();
     } catch (e: unknown) {
-      setRowErr(errorMessage(e));
+      setAssignErr(errorMessage(e));
     } finally {
-      setRowBusyId(null);
+      setAssignBusy(false);
     }
   }
 
-  async function handleDeleteCompetition(competitionId: string) {
-    if (!confirm('Eliminare questa gara?')) return;
+  async function handleToggleTarget(assignmentId: string, nextValue: boolean) {
     setRowErr('');
-    setRowBusyId(competitionId);
+    setRowBusyId(assignmentId);
     try {
       const r = await fetch(
-        `/api/coach/athletes/${athleteId}/competitions/${competitionId}`,
-        { method: 'DELETE' }
-      );
-      const data = await r.json().catch(() => null);
-      if (!r.ok) {
-        const msg =
-          (data && (data.error || data.message)) ||
-          `Errore eliminazione gara (${r.status})`;
-        throw new Error(msg);
-      }
-      await reloadCompetitions();
-    } catch (e: unknown) {
-      setRowErr(errorMessage(e));
-    } finally {
-      setRowBusyId(null);
-    }
-  }
-
-  async function handleToggleTarget(competitionId: string, nextValue: boolean) {
-    setRowErr('');
-    setRowBusyId(competitionId);
-    try {
-      const r = await fetch(
-        `/api/coach/athletes/${athleteId}/competitions/${competitionId}`,
+        `/api/coach/athletes/${athleteId}/competition-assignments/${assignmentId}`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -444,7 +369,31 @@ export default function AthleteDetailPage() {
           `Errore aggiornamento obiettivo (${r.status})`;
         throw new Error(msg);
       }
-      await reloadCompetitions();
+      await reloadAssignments();
+    } catch (e: unknown) {
+      setRowErr(errorMessage(e));
+    } finally {
+      setRowBusyId(null);
+    }
+  }
+
+  async function handleRemoveAssignment(assignmentId: string) {
+    if (!confirm('Rimuovere questa assegnazione?')) return;
+    setRowErr('');
+    setRowBusyId(assignmentId);
+    try {
+      const r = await fetch(
+        `/api/coach/athletes/${athleteId}/competition-assignments/${assignmentId}`,
+        { method: 'DELETE' }
+      );
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        const msg =
+          (data && (data.error || data.message)) ||
+          `Errore rimozione assegnazione (${r.status})`;
+        throw new Error(msg);
+      }
+      await reloadAssignments();
     } catch (e: unknown) {
       setRowErr(errorMessage(e));
     } finally {
@@ -493,11 +442,11 @@ export default function AthleteDetailPage() {
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 10 }}>
         <h2 style={{ margin: 0 }}>Gare</h2>
-        {competitionsLoading ? (
+        {assignmentsLoading ? (
           <p style={{ marginTop: 8 }}>Caricamento gare...</p>
-        ) : competitionsErr ? (
-          <p style={{ marginTop: 8 }}>Errore: {competitionsErr}</p>
-        ) : competitions.length === 0 ? (
+        ) : assignmentsErr ? (
+          <p style={{ marginTop: 8 }}>Errore: {assignmentsErr}</p>
+        ) : assignments.length === 0 ? (
           <p style={{ marginTop: 8 }}>Nessuna gara ancora.</p>
         ) : null}
 
@@ -528,209 +477,40 @@ export default function AthleteDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {competitions.map((c) => {
+              {assignments.map((assignment) => {
+                const c = assignment.competition;
                 const startLabel = toDateInputValue(c.dateStart);
                 const endLabel = toDateInputValue(c.dateEnd);
-                const dateLabel = endLabel ? `${startLabel} → ${endLabel}` : startLabel;
-                const busy = rowBusyId === c.competitionId;
+                const dateLabel = endLabel ? `${startLabel} - ${endLabel}` : startLabel;
+                const statusLabel = COMPETITION_STATUS_LABELS[c.status];
+                const busy = rowBusyId === assignment.assignmentId;
                 return (
-                  <Fragment key={c.competitionId}>
+                  <Fragment key={assignment.assignmentId}>
                     <tr>
                       <td style={{ padding: '6px 4px' }}>{c.name}</td>
                       <td style={{ padding: '6px 4px' }}>{c.type}</td>
                       <td style={{ padding: '6px 4px' }}>{dateLabel}</td>
-                      <td style={{ padding: '6px 4px' }}>{c.status}</td>
-                      <td style={{ padding: '6px 4px' }}>
-                        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          <input
-                            type="checkbox"
-                            checked={c.isTarget}
-                            disabled={busy}
-                            onChange={(e) =>
-                              handleToggleTarget(c.competitionId, e.target.checked)
-                            }
-                          />
-                          {c.isTarget ? '✅ OBIETTIVO' : ''}
-                        </label>
-                      </td>
+                      <td style={{ padding: '6px 4px' }}>{statusLabel}</td>
+                      <td style={{ padding: '6px 4px' }}>{assignment.isTarget ? 'SI' : '-'}</td>
                       <td style={{ padding: '6px 4px', display: 'flex', gap: 8 }}>
-                        {editId === c.competitionId ? (
-                          <>
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => handleSaveCompetition(c.competitionId)}
-                            >
-                              Salva
-                            </button>
-                            <button type="button" disabled={busy} onClick={cancelEdit}>
-                              Annulla
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button type="button" onClick={() => startEdit(c)} disabled={busy}>
-                              Modifica
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteCompetition(c.competitionId)}
-                              disabled={busy}
-                            >
-                              Elimina
-                            </button>
-                          </>
-                        )}
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            handleToggleTarget(assignment.assignmentId, !assignment.isTarget)
+                          }
+                        >
+                          {assignment.isTarget ? 'Rimuovi obiettivo' : 'Imposta obiettivo'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAssignment(assignment.assignmentId)}
+                          disabled={busy}
+                        >
+                          Rimuovi
+                        </button>
                       </td>
                     </tr>
-                    {editId === c.competitionId ? (
-                      <tr>
-                        <td colSpan={6} style={{ padding: '8px 4px' }}>
-                          <div style={{ display: 'grid', gap: 8 }}>
-                            <div style={{ display: 'grid', gap: 6 }}>
-                              <label>
-                                Nome *
-                                <input
-                                  type="text"
-                                  value={editForm.name}
-                                  onChange={(e) =>
-                                    setEditForm((prev) => ({
-                                      ...prev,
-                                      name: e.target.value,
-                                    }))
-                                  }
-                                />
-                              </label>
-                              <label>
-                                Tipo
-                                <select
-                                  value={editForm.type}
-                                  onChange={(e) =>
-                                    setEditForm((prev) => ({
-                                      ...prev,
-                                      type: e.target.value as CompetitionType,
-                                    }))
-                                  }
-                                >
-                                  {COMPETITION_TYPES.map((t) => (
-                                    <option key={t} value={t}>
-                                      {t}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              <label>
-                                Data inizio *
-                                <input
-                                  type="date"
-                                  value={editForm.dateStart}
-                                  onChange={(e) =>
-                                    setEditForm((prev) => ({
-                                      ...prev,
-                                      dateStart: e.target.value,
-                                    }))
-                                  }
-                                />
-                              </label>
-                              <label>
-                                Data fine
-                                <input
-                                  type="date"
-                                  value={editForm.dateEnd}
-                                  onChange={(e) =>
-                                    setEditForm((prev) => ({
-                                      ...prev,
-                                      dateEnd: e.target.value,
-                                    }))
-                                  }
-                                />
-                              </label>
-                              <label>
-                                Luogo
-                                <input
-                                  type="text"
-                                  value={editForm.location}
-                                  onChange={(e) =>
-                                    setEditForm((prev) => ({
-                                      ...prev,
-                                      location: e.target.value,
-                                    }))
-                                  }
-                                />
-                              </label>
-                              <label>
-                                Link
-                                <input
-                                  type="url"
-                                  value={editForm.link}
-                                  onChange={(e) =>
-                                    setEditForm((prev) => ({
-                                      ...prev,
-                                      link: e.target.value,
-                                    }))
-                                  }
-                                />
-                              </label>
-                              <label>
-                                Stato
-                                <select
-                                  value={editForm.status}
-                                  onChange={(e) =>
-                                    setEditForm((prev) => ({
-                                      ...prev,
-                                      status: e.target.value as CompetitionStatus,
-                                    }))
-                                  }
-                                >
-                                  {COMPETITION_STATUSES.map((s) => (
-                                    <option key={s} value={s}>
-                                      {s}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              <label>
-                                Note pubbliche
-                                <textarea
-                                  value={editForm.notesPublic}
-                                  onChange={(e) =>
-                                    setEditForm((prev) => ({
-                                      ...prev,
-                                      notesPublic: e.target.value,
-                                    }))
-                                  }
-                                />
-                              </label>
-                              <label>
-                                Note private
-                                <textarea
-                                  value={editForm.notesPrivate}
-                                  onChange={(e) =>
-                                    setEditForm((prev) => ({
-                                      ...prev,
-                                      notesPrivate: e.target.value,
-                                    }))
-                                  }
-                                />
-                              </label>
-                              <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={editForm.isTarget}
-                                  onChange={(e) =>
-                                    setEditForm((prev) => ({
-                                      ...prev,
-                                      isTarget: e.target.checked,
-                                    }))
-                                  }
-                                />
-                                Gara obiettivo
-                              </label>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : null}
                   </Fragment>
                 );
               })}
@@ -739,142 +519,54 @@ export default function AthleteDetailPage() {
         </div>
 
         <div style={{ marginTop: 12 }}>
-          {!showNewForm ? (
-            <button type="button" onClick={() => setShowNewForm(true)}>
-              Aggiungi gara
+          {!showAssignForm ? (
+            <button type="button" onClick={() => setShowAssignForm(true)}>
+              Assegna gara
             </button>
           ) : (
-            <form onSubmit={handleAddCompetition} style={{ display: 'grid', gap: 8 }}>
+            <form onSubmit={handleAssignCompetition} style={{ display: 'grid', gap: 8 }}>
               <div style={{ display: 'grid', gap: 6 }}>
                 <label>
-                  Nome *
-                  <input
-                    type="text"
-                    value={newForm.name}
-                    onChange={(e) =>
-                      setNewForm((prev) => ({ ...prev, name: e.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Tipo
+                  Gara
                   <select
-                    value={newForm.type}
-                    onChange={(e) =>
-                      setNewForm((prev) => ({
-                        ...prev,
-                        type: e.target.value as CompetitionType,
-                      }))
-                    }
+                    value={assignCompetitionId}
+                    disabled={libraryLoading}
+                    onChange={(e) => setAssignCompetitionId(e.target.value)}
                   >
-                    {COMPETITION_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
+                    <option value="">Seleziona gara</option>
+                    {library.map((item) => (
+                      <option key={item.competitionId} value={item.competitionId}>
+                        {item.name}
                       </option>
                     ))}
                   </select>
-                </label>
-                <label>
-                  Data inizio *
-                  <input
-                    type="date"
-                    value={newForm.dateStart}
-                    onChange={(e) =>
-                      setNewForm((prev) => ({ ...prev, dateStart: e.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Data fine
-                  <input
-                    type="date"
-                    value={newForm.dateEnd}
-                    onChange={(e) =>
-                      setNewForm((prev) => ({ ...prev, dateEnd: e.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Luogo
-                  <input
-                    type="text"
-                    value={newForm.location}
-                    onChange={(e) =>
-                      setNewForm((prev) => ({ ...prev, location: e.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Link
-                  <input
-                    type="url"
-                    value={newForm.link}
-                    onChange={(e) =>
-                      setNewForm((prev) => ({ ...prev, link: e.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Stato
-                  <select
-                    value={newForm.status}
-                    onChange={(e) =>
-                      setNewForm((prev) => ({
-                        ...prev,
-                        status: e.target.value as CompetitionStatus,
-                      }))
-                    }
-                  >
-                    {COMPETITION_STATUSES.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Note pubbliche
-                  <textarea
-                    value={newForm.notesPublic}
-                    onChange={(e) =>
-                      setNewForm((prev) => ({ ...prev, notesPublic: e.target.value }))
-                    }
-                  />
-                </label>
-                <label>
-                  Note private
-                  <textarea
-                    value={newForm.notesPrivate}
-                    onChange={(e) =>
-                      setNewForm((prev) => ({ ...prev, notesPrivate: e.target.value }))
-                    }
-                  />
                 </label>
                 <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input
                     type="checkbox"
-                    checked={newForm.isTarget}
-                    onChange={(e) =>
-                      setNewForm((prev) => ({ ...prev, isTarget: e.target.checked }))
-                    }
+                    checked={assignIsTarget}
+                    onChange={(e) => setAssignIsTarget(e.target.checked)}
                   />
                   Gara obiettivo
                 </label>
               </div>
 
-              {newFormErr ? <p>Errore: {newFormErr}</p> : null}
+              {libraryLoading ? <p>Caricamento libreria...</p> : null}
+              {libraryErr ? <p>Errore: {libraryErr}</p> : null}
+              {assignErr ? <p>Errore: {assignErr}</p> : null}
 
               <div style={{ display: 'flex', gap: 8 }}>
-                <button type="submit" disabled={newFormBusy}>
-                  Aggiungi
+                <button type="submit" disabled={assignBusy || libraryLoading}>
+                  Assegna
                 </button>
                 <button
                   type="button"
-                  disabled={newFormBusy}
+                  disabled={assignBusy}
                   onClick={() => {
-                    setShowNewForm(false);
-                    setNewFormErr('');
-                    setNewForm(createEmptyCompetitionForm());
+                    setShowAssignForm(false);
+                    setAssignErr('');
+                    setAssignCompetitionId('');
+                    setAssignIsTarget(false);
                   }}
                 >
                   Annulla
@@ -892,3 +584,4 @@ export default function AthleteDetailPage() {
     </main>
   );
 }
+
