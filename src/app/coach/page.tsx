@@ -202,9 +202,40 @@ export default function CoachAthletesPage() {
   return (
     <main style={{ maxWidth: 980, margin: "36px auto", padding: 16 }}>
       <section>
-        <h1 style={{ fontSize: 28, fontWeight: 900 }}>Area Coach — Atleti</h1>
+        <h1 style={{ fontSize: 28, fontWeight: 900 }}>Area Coach - Atleti</h1>
 
         <ForbiddenBanner text={bannerText} />
+
+        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+          <a
+            href="/coach/competitions"
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #ddd",
+              textDecoration: "none",
+              fontWeight: 900,
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+          >
+            Gare
+          </a>
+          <a
+            href="/coach/events"
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #ddd",
+              textDecoration: "none",
+              fontWeight: 900,
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+          >
+            Eventi
+          </a>
+        </div>
 
         <p style={{ opacity: 0.8, marginTop: 6 }}>
           Crea atleti e genera inviti one-time (link).

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-
+import Link from "next/link";
 import ForbiddenBanner from "@/components/ForbiddenBanner";
 
 type CompetitionStatus = "PLANNED" | "DONE" | "CANCELLED";
@@ -438,6 +438,11 @@ export default function CoachCompetitionsPage() {
 
   return (
     <main style={{ maxWidth: 980, margin: "36px auto", padding: 16 }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+  <Link href="/coach" style={{ textDecoration: "underline" }}>
+    ← Torna al coach
+  </Link>
+</div>
       <section>
         <h1 style={{ fontSize: 28, fontWeight: 900 }}>Area Coach - Gare</h1>
         <ForbiddenBanner text={bannerText} />
