@@ -235,6 +235,20 @@ export default function CoachAthletesPage() {
           >
             Eventi
           </a>
+          <a
+            href="/coach/exercises"
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #ddd",
+              textDecoration: "none",
+              fontWeight: 900,
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+          >
+            Esercizi
+          </a>
         </div>
 
         <p style={{ opacity: 0.8, marginTop: 6 }}>
