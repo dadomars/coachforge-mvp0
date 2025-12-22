@@ -9,65 +9,66 @@ datasource db {
 }
 
 model Coach {
-  coachId              String   @id @default(cuid()) @map("coach_id")
-  email                String   @unique @map("email")
-  passwordHash         String   @map("password_hash")
-  name                 String?  @map("name")
-  roundingIncrementKg  Float?   @map("rounding_increment_kg")
-  createdAt            DateTime @default(now()) @map("created_at")
+  coachId             String   @id @default(cuid()) @map("coach_id")
+  email               String   @unique @map("email")
+  passwordHash        String   @map("password_hash")
+  name                String?  @map("name")
+  roundingIncrementKg Float?   @map("rounding_increment_kg")
+  createdAt           DateTime @default(now()) @map("created_at")
 
-  athletes             Athlete[]
-  competitions         Competition[]
-  events               Event[]
+  athletes     Athlete[]
+  competitions Competition[]
+  events       Event[]
+  exercises    Exercise[]
 
   @@map("coach")
 }
 
 model Athlete {
-  athleteId     String   @id @default(cuid()) @map("athlete_id")
-  coachId       String   @map("coach_id")
+  athleteId String @id @default(cuid()) @map("athlete_id")
+  coachId   String @map("coach_id")
 
-  firstName     String   @map("first_name")
-  lastName      String   @map("last_name")
+  firstName String @map("first_name")
+  lastName  String @map("last_name")
 
-  notesPublic   String?  @map("notes_public")
-  notesPrivate  String?  @map("notes_private")
+  notesPublic  String? @map("notes_public")
+  notesPrivate String? @map("notes_private")
 
-  createdAt     DateTime @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
-  coach         Coach    @relation(fields: [coachId], references: [coachId], onDelete: Cascade)
-  auth          AthleteAuth?
-  invites       AthleteInvite[]
-  events        Event[]
-  competitions  Competition[]
+  coach                  Coach                   @relation(fields: [coachId], references: [coachId], onDelete: Cascade)
+  auth                   AthleteAuth?
+  invites                AthleteInvite[]
+  events                 Event[]
+  competitions           Competition[]
   competitionAssignments CompetitionAssignment[]
-  eventAssignments EventAssignment[]
+  eventAssignments       EventAssignment[]
 
   @@index([coachId], map: "idx_athlete_coach_id")
   @@map("athlete")
 }
 
 model AthleteAuth {
-  athleteId        String    @id @map("athlete_id")
-  loginIdentifier  String    @unique @map("login_identifier") // EMAIL
-  passwordHash     String?   @map("password_hash")
-  activatedAt      DateTime? @map("activated_at")
+  athleteId       String    @id @map("athlete_id")
+  loginIdentifier String    @unique @map("login_identifier") // EMAIL
+  passwordHash    String?   @map("password_hash")
+  activatedAt     DateTime? @map("activated_at")
 
-  athlete          Athlete   @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
+  athlete Athlete @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
 
   @@map("athlete_auth")
 }
 
 model AthleteInvite {
-  inviteId     String    @id @default(cuid()) @map("invite_id")
-  athleteId    String    @map("athlete_id")
+  inviteId  String @id @default(cuid()) @map("invite_id")
+  athleteId String @map("athlete_id")
 
-  tokenHash    String    @unique @map("token_hash")
-  expiresAt    DateTime  @map("expires_at")
-  usedAt       DateTime? @map("used_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
 
-  athlete      Athlete   @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
+  athlete Athlete @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
 
   @@index([athleteId], map: "idx_invite_athlete_id")
   @@map("athlete_invite")
@@ -86,49 +87,76 @@ enum CompetitionType {
   ALTRO
 }
 
-model Competition {
-  competitionId String      @id @default(cuid()) @map("competition_id")
-  athleteId     String      @map("athlete_id")
-  coachId       String?     @map("coach_id")
-  name          String      @map("name")
-  dateStart     DateTime    @map("date_start")
-  dateEnd       DateTime?   @map("date_end")
-  location      String?     @map("location")
-  notesPublic   String      @default("") @map("notes_public")
-  notesPrivate  String      @default("") @map("notes_private")
-  status        EventStatus @map("status")
-  type          CompetitionType @default(ALTRO) @map("type")
-  isTarget      Boolean     @default(false) @map("is_target")
-  link          String?     @map("link")
+enum ExerciseCategory {
+  WEIGHTLIFTING
+  GYM
+  METCON
+  RUN
+  ERG
+  ALTRO
+}
 
-  athlete       Athlete     @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
-  coach         Coach?      @relation(fields: [coachId], references: [coachId], onDelete: SetNull)
-  assignments   CompetitionAssignment[]
+model Competition {
+  competitionId String          @id @default(cuid()) @map("competition_id")
+  athleteId     String          @map("athlete_id")
+  coachId       String?         @map("coach_id")
+  name          String          @map("name")
+  dateStart     DateTime        @map("date_start")
+  dateEnd       DateTime?       @map("date_end")
+  location      String?         @map("location")
+  notesPublic   String          @default("") @map("notes_public")
+  notesPrivate  String          @default("") @map("notes_private")
+  status        EventStatus     @map("status")
+  type          CompetitionType @default(ALTRO) @map("type")
+  isTarget      Boolean         @default(false) @map("is_target")
+  link          String?         @map("link")
+
+  athlete     Athlete                 @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
+  coach       Coach?                  @relation(fields: [coachId], references: [coachId], onDelete: SetNull)
+  assignments CompetitionAssignment[]
 
   @@index([athleteId], map: "idx_competition_athlete_id")
   @@map("competition")
 }
 
 model Event {
-  eventId    String      @id @default(cuid()) @map("event_id")
-  athleteId  String?     @map("athlete_id")
-  coachId    String?     @map("coach_id")
-  name       String      @map("name")
-  dateStart  DateTime    @map("date_start")
-  dateEnd    DateTime?   @map("date_end")
-  location   String?     @map("location")
-  notesPublic  String     @default("") @map("notes_public")
-  notesPrivate String     @default("") @map("notes_private")
-  status     EventStatus @map("status")
-  typeLabel  String      @map("type_label")
-  link       String?     @map("link")
+  eventId      String      @id @default(cuid()) @map("event_id")
+  athleteId    String?     @map("athlete_id")
+  coachId      String?     @map("coach_id")
+  name         String      @map("name")
+  dateStart    DateTime    @map("date_start")
+  dateEnd      DateTime?   @map("date_end")
+  location     String?     @map("location")
+  notesPublic  String      @default("") @map("notes_public")
+  notesPrivate String      @default("") @map("notes_private")
+  status       EventStatus @map("status")
+  typeLabel    String      @map("type_label")
+  link         String?     @map("link")
 
-  athlete    Athlete?    @relation(fields: [athleteId], references: [athleteId], onDelete: SetNull)
-  coach      Coach?      @relation(fields: [coachId], references: [coachId], onDelete: SetNull)
+  athlete     Athlete?          @relation(fields: [athleteId], references: [athleteId], onDelete: SetNull)
+  coach       Coach?            @relation(fields: [coachId], references: [coachId], onDelete: SetNull)
   assignments EventAssignment[]
 
   @@index([athleteId], map: "idx_event_athlete_id")
   @@map("event")
+}
+
+model Exercise {
+  exerciseId   String           @id @default(cuid()) @map("exercise_id")
+  coachId      String           @map("coach_id")
+  name         String           @map("name")
+  category     ExerciseCategory @default(ALTRO) @map("category")
+  notesPublic  String           @default("") @map("notes_public")
+  notesPrivate String           @default("") @map("notes_private")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  coach Coach @relation(fields: [coachId], references: [coachId], onDelete: Cascade)
+
+  @@unique([coachId, name], map: "uq_exercise_coach_name")
+  @@index([coachId], map: "idx_exercise_coach_id")
+  @@index([name], map: "idx_exercise_name")
+  @@map("exercise")
 }
 
 model CompetitionAssignment {
@@ -138,8 +166,8 @@ model CompetitionAssignment {
   isTarget      Boolean  @default(false) @map("is_target")
   assignedAt    DateTime @default(now()) @map("assigned_at")
 
-  athlete       Athlete     @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
-  competition   Competition @relation(fields: [competitionId], references: [competitionId], onDelete: Cascade)
+  athlete     Athlete     @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
+  competition Competition @relation(fields: [competitionId], references: [competitionId], onDelete: Cascade)
 
   @@unique([athleteId, competitionId], map: "uq_competition_assignment_athlete_competition")
   @@index([athleteId], map: "idx_competition_assignment_athlete_id")
@@ -153,8 +181,8 @@ model EventAssignment {
   eventId      String   @map("event_id")
   assignedAt   DateTime @default(now()) @map("assigned_at")
 
-  athlete      Athlete @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
-  event        Event   @relation(fields: [eventId], references: [eventId], onDelete: Cascade)
+  athlete Athlete @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
+  event   Event   @relation(fields: [eventId], references: [eventId], onDelete: Cascade)
 
   @@unique([athleteId, eventId], map: "uq_event_assignment_athlete_event")
   @@index([athleteId], map: "idx_event_assignment_athlete_id")
