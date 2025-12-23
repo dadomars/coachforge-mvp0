@@ -20,6 +20,7 @@ model Coach {
   competitions Competition[]
   events       Event[]
   exercises    Exercise[]
+  sessionTemplates SessionTemplate[]
 
   @@map("coach")
 }
@@ -152,11 +153,64 @@ model Exercise {
   updatedAt    DateTime         @updatedAt @map("updated_at")
 
   coach Coach @relation(fields: [coachId], references: [coachId], onDelete: Cascade)
+  sessionTemplateRows SessionTemplateExerciseRow[]
 
   @@unique([coachId, name], map: "uq_exercise_coach_name")
   @@index([coachId], map: "idx_exercise_coach_id")
   @@index([name], map: "idx_exercise_name")
   @@map("exercise")
+}
+
+model SessionTemplate {
+  sessionTemplateId String   @id @default(cuid()) @map("session_template_id")
+  coachId           String   @map("coach_id")
+  title             String   @map("title")
+  notesPublic       String   @default("") @map("notes_public")
+  notesPrivate      String   @default("") @map("notes_private")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  coach  Coach                  @relation(fields: [coachId], references: [coachId], onDelete: Cascade)
+  blocks SessionTemplateBlock[]
+
+  @@index([coachId], map: "idx_session_template_coach_id")
+  @@map("session_template")
+}
+
+model SessionTemplateBlock {
+  blockId           String @id @default(cuid()) @map("block_id")
+  sessionTemplateId String @map("session_template_id")
+  name              String @map("name")
+  sortOrder         Int    @map("sort_order")
+
+  template SessionTemplate             @relation(fields: [sessionTemplateId], references: [sessionTemplateId], onDelete: Cascade)
+  rows     SessionTemplateExerciseRow[]
+
+  @@index([sessionTemplateId], map: "idx_session_template_block_template_id")
+  @@index([sortOrder], map: "idx_session_template_block_sort_order")
+  @@map("session_template_block")
+}
+
+model SessionTemplateExerciseRow {
+  rowId      String  @id @default(cuid()) @map("row_id")
+  blockId    String  @map("block_id")
+  exerciseId String  @map("exercise_id")
+  sortOrder  Int     @map("sort_order")
+  sets       String? @map("sets")
+  reps       String? @map("reps")
+  rest       String? @map("rest")
+  percent    Float?  @map("percent")
+  kg         Float?  @map("kg")
+  notesPublic  String? @map("notes_public")
+  notesPrivate String? @map("notes_private")
+
+  block    SessionTemplateBlock @relation(fields: [blockId], references: [blockId], onDelete: Cascade)
+  exercise Exercise             @relation(fields: [exerciseId], references: [exerciseId], onDelete: Cascade)
+
+  @@index([blockId], map: "idx_session_template_row_block_id")
+  @@index([exerciseId], map: "idx_session_template_row_exercise_id")
+  @@index([sortOrder], map: "idx_session_template_row_sort_order")
+  @@map("session_template_row")
 }
 
 model CompetitionAssignment {

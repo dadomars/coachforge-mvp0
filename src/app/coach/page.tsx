@@ -249,6 +249,20 @@ export default function CoachAthletesPage() {
           >
             Esercizi
           </a>
+          <a
+            href="/coach/session-templates"
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #ddd",
+              textDecoration: "none",
+              fontWeight: 900,
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+          >
+            Template sessioni
+          </a>
         </div>
 
         <p style={{ opacity: 0.8, marginTop: 6 }}>
