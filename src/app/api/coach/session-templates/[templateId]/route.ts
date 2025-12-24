@@ -86,15 +86,17 @@ function parseBlocks(input: unknown): { blocks: BlockInput[]; error?: string } {
         return { blocks: [], error: "Kg non validi." };
       }
 
+      const notesPublic = toOptionalTrimmedString(rowRec.notesPublic);
       const notesPrivate = toOptionalTrimmedString(rowRec.notesPrivate);
+      const hasPublicNote = !!notesPublic;
       const hasCoachNote = !!notesPrivate;
       const hasPercent = percent != null;
       const hasKg = kg != null;
 
-      if (!hasCoachNote && !hasPercent && !hasKg) {
+      if (!hasCoachNote && !hasPublicNote && !hasPercent && !hasKg) {
         return {
           blocks: [],
-          error: "Ogni riga deve avere almeno nota coach, % o kg.",
+          error: "Ogni riga deve avere almeno nota pubblica/privata, % o kg.",
         };
       }
 
@@ -105,7 +107,7 @@ function parseBlocks(input: unknown): { blocks: BlockInput[]; error?: string } {
         rest: toOptionalTrimmedString(rowRec.rest),
         percent,
         kg,
-        notesPublic: toOptionalTrimmedString(rowRec.notesPublic),
+        notesPublic,
         notesPrivate,
       });
     }
@@ -260,4 +262,29 @@ export async function PATCH(
   });
 
   return NextResponse.json(updated);
+}
+
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ templateId: string }> }
+) {
+  const { templateId } = await params;
+
+  const session = await getServerSession(authOptions);
+  if (!session || !session.uid) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (session.role !== "COACH") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const deleted = await prisma.sessionTemplate.deleteMany({
+    where: { sessionTemplateId: templateId, coachId: session.uid },
+  });
+
+  if (deleted.count === 0) {
+    return NextResponse.json({ error: "Template non trovato" }, { status: 404 });
+  }
+
+  return NextResponse.json({ ok: true });
 }

@@ -86,15 +86,17 @@ function parseBlocks(input: unknown): { blocks: BlockInput[]; error?: string } {
         return { blocks: [], error: "Kg non validi." };
       }
 
+      const notesPublic = toOptionalTrimmedString(rowRec.notesPublic);
       const notesPrivate = toOptionalTrimmedString(rowRec.notesPrivate);
+      const hasPublicNote = !!notesPublic;
       const hasCoachNote = !!notesPrivate;
       const hasPercent = percent != null;
       const hasKg = kg != null;
 
-      if (!hasCoachNote && !hasPercent && !hasKg) {
+      if (!hasCoachNote && !hasPublicNote && !hasPercent && !hasKg) {
         return {
           blocks: [],
-          error: "Ogni riga deve avere almeno nota coach, % o kg.",
+          error: "Ogni riga deve avere almeno nota pubblica/privata, % o kg.",
         };
       }
 
@@ -105,7 +107,7 @@ function parseBlocks(input: unknown): { blocks: BlockInput[]; error?: string } {
         rest: toOptionalTrimmedString(rowRec.rest),
         percent,
         kg,
-        notesPublic: toOptionalTrimmedString(rowRec.notesPublic),
+        notesPublic,
         notesPrivate,
       });
     }
