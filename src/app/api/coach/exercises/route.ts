@@ -17,7 +17,7 @@ function isValidCategory(value: string): value is ExerciseCategory {
   return (VALID_CATEGORIES as readonly string[]).includes(value);
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
   if (!session || !session.uid) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -26,9 +26,18 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  const url = new URL(req.url);
+  const q = url.searchParams.get("q")?.trim() || "";
+
   const items = await prisma.exercise.findMany({
-    where: { coachId: session.uid },
-    orderBy: { updatedAt: "desc" },
+    where: q
+      ? {
+          coachId: session.uid,
+          name: { contains: q, mode: "insensitive" },
+        }
+      : { coachId: session.uid },
+    orderBy: q ? { name: "asc" } : { updatedAt: "desc" },
+    take: q ? 20 : undefined,
     select: {
       exerciseId: true,
       coachId: true,

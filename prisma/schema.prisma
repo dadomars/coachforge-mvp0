@@ -237,6 +237,8 @@ model AssignedSession {
 
   @@index([athleteId, date], map: "idx_assigned_session_athlete_date")
   @@index([coachId], map: "idx_assigned_session_coach_id")
+  @@index([athleteId], map: "idx_assigned_session_athlete_id")
+  @@index([date], map: "idx_assigned_session_date")
   @@map("assigned_session")
 }
 

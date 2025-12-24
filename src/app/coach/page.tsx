@@ -263,6 +263,20 @@ export default function CoachAthletesPage() {
           >
             Template sessioni
           </a>
+          <a
+            href="/coach/assigned-sessions"
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #ddd",
+              textDecoration: "none",
+              fontWeight: 900,
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+          >
+            Sessioni assegnate
+          </a>
         </div>
 
         <p style={{ opacity: 0.8, marginTop: 6 }}>
