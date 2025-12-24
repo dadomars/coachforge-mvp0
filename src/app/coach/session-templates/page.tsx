@@ -4,6 +4,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type FormEvent,
@@ -265,8 +266,6 @@ export default function CoachSessionTemplatesPage() {
   const [templateBusyId, setTemplateBusyId] = useState<string | null>(null);
 
   const [exercises, setExercises] = useState<ExerciseRow[]>([]);
-  const [exercisesLoading, setExercisesLoading] = useState(true);
-  const [exercisesError, setExercisesError] = useState("");
 
   const [showNewForm, setShowNewForm] = useState(false);
   const [newForm, setNewForm] = useState<TemplateForm>(createEmptyForm);
@@ -283,10 +282,15 @@ export default function CoachSessionTemplatesPage() {
   const [viewTemplate, setViewTemplate] = useState<TemplateDetail | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
   const [viewErr, setViewErr] = useState("");
+  const [searchResults, setSearchResults] = useState<Record<string, ExerciseRow[]>>({});
+  const [searchLoadingByKey, setSearchLoadingByKey] = useState<Record<string, boolean>>(
+    {}
+  );
+  const [searchErrorByKey, setSearchErrorByKey] = useState<Record<string, string>>({});
+  const searchTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const searchQueryRef = useRef<Record<string, string>>({});
 
   async function loadExercises() {
-    setExercisesLoading(true);
-    setExercisesError("");
     try {
       const r = await fetch("/api/coach/exercises", { cache: "no-store" });
       const data = await r.json().catch(() => null);
@@ -302,10 +306,7 @@ export default function CoachSessionTemplatesPage() {
         .filter(Boolean) as ExerciseRow[];
       setExercises(normalized);
     } catch (e) {
-      setExercisesError(e instanceof Error ? e.message : "Errore sconosciuto.");
       setExercises([]);
-    } finally {
-      setExercisesLoading(false);
     }
   }
 
@@ -341,6 +342,12 @@ export default function CoachSessionTemplatesPage() {
     setForbidden(new URLSearchParams(window.location.search).get("forbidden"));
   }, []);
 
+  useEffect(() => {
+    return () => {
+      Object.values(searchTimersRef.current).forEach((timer) => clearTimeout(timer));
+    };
+  }, []);
+
   const exercisesById = useMemo(() => {
     const map: Record<string, ExerciseRow> = {};
     exercises.forEach((ex) => {
@@ -351,6 +358,87 @@ export default function CoachSessionTemplatesPage() {
 
   function isEnduranceCategory(category?: string) {
     return category === "RUN" || category === "ERG";
+  }
+
+  function getRowKey(kind: "new" | "edit", blockIndex: number, rowIndex: number) {
+    return `${kind}-${blockIndex}-${rowIndex}`;
+  }
+
+  function scheduleExerciseSearch(key: string, value: string) {
+    const trimmed = value.trim();
+    searchQueryRef.current[key] = trimmed;
+
+    if (searchTimersRef.current[key]) {
+      clearTimeout(searchTimersRef.current[key]);
+      delete searchTimersRef.current[key];
+    }
+
+    if (trimmed.length < 2) {
+      setSearchResults((prev) => ({ ...prev, [key]: [] }));
+      setSearchLoadingByKey((prev) => ({ ...prev, [key]: false }));
+      setSearchErrorByKey((prev) => ({ ...prev, [key]: "" }));
+      return;
+    }
+
+    searchTimersRef.current[key] = setTimeout(async () => {
+      const latest = searchQueryRef.current[key];
+      if (latest !== trimmed) return;
+      setSearchLoadingByKey((prev) => ({ ...prev, [key]: true }));
+      setSearchErrorByKey((prev) => ({ ...prev, [key]: "" }));
+      try {
+        const r = await fetch(`/api/coach/exercises?q=${encodeURIComponent(trimmed)}`, {
+          cache: "no-store",
+        });
+        const data = await r.json().catch(() => null);
+        if (!r.ok) {
+          const msg =
+            (data && (data.error || data.message)) ||
+            `Errore ricerca esercizi (${r.status})`;
+          throw new Error(msg);
+        }
+        if (!Array.isArray(data)) throw new Error("Risposta esercizi non valida.");
+        const normalized = data
+          .map((row: unknown) => normalizeExercise(row))
+          .filter(Boolean) as ExerciseRow[];
+        setSearchResults((prev) => ({ ...prev, [key]: normalized.slice(0, 20) }));
+      } catch (e) {
+        setSearchErrorByKey((prev) => ({
+          ...prev,
+          [key]: e instanceof Error ? e.message : "Errore sconosciuto.",
+        }));
+        setSearchResults((prev) => ({ ...prev, [key]: [] }));
+      } finally {
+        setSearchLoadingByKey((prev) => ({ ...prev, [key]: false }));
+      }
+    }, 250);
+  }
+
+  function handleExerciseSearchChange(
+    kind: "new" | "edit",
+    setForm: Dispatch<SetStateAction<TemplateForm>>,
+    blockIndex: number,
+    rowIndex: number,
+    value: string
+  ) {
+    updateRow(setForm, blockIndex, rowIndex, { exerciseSearch: value });
+    scheduleExerciseSearch(getRowKey(kind, blockIndex, rowIndex), value);
+  }
+
+  function handleExerciseSelect(
+    kind: "new" | "edit",
+    setForm: Dispatch<SetStateAction<TemplateForm>>,
+    blockIndex: number,
+    rowIndex: number,
+    exercise: ExerciseRow
+  ) {
+    const key = getRowKey(kind, blockIndex, rowIndex);
+    updateRow(setForm, blockIndex, rowIndex, {
+      exerciseId: exercise.exerciseId,
+      exerciseSearch: exercise.name,
+    });
+    setSearchResults((prev) => ({ ...prev, [key]: [] }));
+    setSearchLoadingByKey((prev) => ({ ...prev, [key]: false }));
+    setSearchErrorByKey((prev) => ({ ...prev, [key]: "" }));
   }
 
   function addBlock(setForm: Dispatch<SetStateAction<TemplateForm>>) {
@@ -751,20 +839,19 @@ export default function CoachSessionTemplatesPage() {
                   </label>
 
                   {block.rows.map((row, rowIndex) => {
-                    const filter = row.exerciseSearch.trim().toLowerCase();
-                    let options = exercises.filter((ex) =>
-                      ex.name.toLowerCase().includes(filter)
-                    );
+                    const rowKey = getRowKey("new", blockIndex, rowIndex);
                     const selected = exercisesById[row.exerciseId];
-                    if (
-                      row.exerciseId &&
-                      selected &&
-                      !options.some((opt) => opt.exerciseId === row.exerciseId)
-                    ) {
-                      options = [selected, ...options];
-                    }
                     const isRunErg = isEnduranceCategory(selected?.category);
-                    const showNoResults = !exercisesLoading && options.length === 0;
+                    const suggestions = searchResults[rowKey] ?? [];
+                    const searchLoading = !!searchLoadingByKey[rowKey];
+                    const searchError = searchErrorByKey[rowKey] ?? "";
+                    const searchActive = row.exerciseSearch.trim().length >= 2;
+                    const showNoResults =
+                      searchActive &&
+                      !searchLoading &&
+                      suggestions.length === 0 &&
+                      !searchError &&
+                      !selected;
                     return (
                       <div
                         key={`new-row-${blockIndex}-${rowIndex}`}
@@ -791,37 +878,73 @@ export default function CoachSessionTemplatesPage() {
                           <input
                             value={row.exerciseSearch}
                             onChange={(e) =>
-                              updateRow(setNewForm, blockIndex, rowIndex, {
-                                exerciseSearch: e.target.value,
-                              })
+                              handleExerciseSearchChange(
+                                "new",
+                                setNewForm,
+                                blockIndex,
+                                rowIndex,
+                                e.target.value
+                              )
                             }
-                            placeholder="Cerca in libreria"
+                            placeholder="Cerca esercizio..."
                           />
                         </label>
 
-                        <label style={{ display: "grid", gap: 6 }}>
-                          <span>Esercizio *</span>
-                          <select
-                            value={row.exerciseId}
-                            onChange={(e) =>
-                              updateRow(setNewForm, blockIndex, rowIndex, {
-                                exerciseId: e.target.value,
-                              })
-                            }
-                            disabled={exercisesLoading}
-                          >
-                            <option value="">Seleziona esercizio</option>
-                            {options.map((ex) => (
-                              <option key={ex.exerciseId} value={ex.exerciseId}>
-                                {ex.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        {exercisesLoading ? <p>Caricamento esercizi...</p> : null}
-                        {exercisesError ? <p>Errore: {exercisesError}</p> : null}
+                        {searchLoading ? <p>Ricerca in corso...</p> : null}
+                        {searchError ? <p>Errore: {searchError}</p> : null}
                         {showNoResults ? <p>Nessun risultato.</p> : null}
+
+                        {searchActive && suggestions.length > 0 ? (
+                          <div
+                            style={{
+                              display: "grid",
+                              gap: 6,
+                              padding: 8,
+                              borderRadius: 10,
+                              border: "1px solid #eee",
+                              background: "#fafafa",
+                            }}
+                          >
+                            {suggestions.map((ex) => (
+                              <button
+                                key={ex.exerciseId}
+                                type="button"
+                                onClick={() =>
+                                  handleExerciseSelect(
+                                    "new",
+                                    setNewForm,
+                                    blockIndex,
+                                    rowIndex,
+                                    ex
+                                  )
+                                }
+                                style={{
+                                  textAlign: "left",
+                                  padding: "6px 8px",
+                                  borderRadius: 8,
+                                  border: "1px solid #ddd",
+                                  background: "#fff",
+                                }}
+                              >
+                                {ex.name}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        <div style={{ display: "grid", gap: 6 }}>
+                          <span>Esercizio *</span>
+                          <div
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: 10,
+                              border: "1px solid #ddd",
+                              background: "#fff",
+                            }}
+                          >
+                            {selected ? selected.name : "Nessun esercizio selezionato"}
+                          </div>
+                        </div>
 
                         {isRunErg ? (
                           <div
@@ -1002,6 +1125,29 @@ export default function CoachSessionTemplatesPage() {
           }}
         >
           <h2 style={{ margin: 0 }}>Modifica template</h2>
+          <div
+            style={{
+              position: "sticky",
+              top: 0,
+              zIndex: 2,
+              background: "#fff",
+              padding: "8px 0",
+              borderBottom: "1px solid #eee",
+              display: "flex",
+              gap: 8,
+            }}
+          >
+            <button
+              type="button"
+              onClick={handleSaveTemplate}
+              disabled={editBusy || editLoading}
+            >
+              {editBusy ? "Salvo..." : "Salva"}
+            </button>
+            <button type="button" onClick={cancelEdit} disabled={editBusy}>
+              Annulla
+            </button>
+          </div>
           {editLoading ? (
             <p>Caricamento template...</p>
           ) : (
@@ -1062,20 +1208,19 @@ export default function CoachSessionTemplatesPage() {
                   </label>
 
                   {block.rows.map((row, rowIndex) => {
-                    const filter = row.exerciseSearch.trim().toLowerCase();
-                    let options = exercises.filter((ex) =>
-                      ex.name.toLowerCase().includes(filter)
-                    );
+                    const rowKey = getRowKey("edit", blockIndex, rowIndex);
                     const selected = exercisesById[row.exerciseId];
-                    if (
-                      row.exerciseId &&
-                      selected &&
-                      !options.some((opt) => opt.exerciseId === row.exerciseId)
-                    ) {
-                      options = [selected, ...options];
-                    }
                     const isRunErg = isEnduranceCategory(selected?.category);
-                    const showNoResults = !exercisesLoading && options.length === 0;
+                    const suggestions = searchResults[rowKey] ?? [];
+                    const searchLoading = !!searchLoadingByKey[rowKey];
+                    const searchError = searchErrorByKey[rowKey] ?? "";
+                    const searchActive = row.exerciseSearch.trim().length >= 2;
+                    const showNoResults =
+                      searchActive &&
+                      !searchLoading &&
+                      suggestions.length === 0 &&
+                      !searchError &&
+                      !selected;
                     return (
                       <div
                         key={`edit-row-${blockIndex}-${rowIndex}`}
@@ -1102,37 +1247,73 @@ export default function CoachSessionTemplatesPage() {
                           <input
                             value={row.exerciseSearch}
                             onChange={(e) =>
-                              updateRow(setEditForm, blockIndex, rowIndex, {
-                                exerciseSearch: e.target.value,
-                              })
+                              handleExerciseSearchChange(
+                                "edit",
+                                setEditForm,
+                                blockIndex,
+                                rowIndex,
+                                e.target.value
+                              )
                             }
-                            placeholder="Cerca in libreria"
+                            placeholder="Cerca esercizio..."
                           />
                         </label>
 
-                        <label style={{ display: "grid", gap: 6 }}>
-                          <span>Esercizio *</span>
-                          <select
-                            value={row.exerciseId}
-                            onChange={(e) =>
-                              updateRow(setEditForm, blockIndex, rowIndex, {
-                                exerciseId: e.target.value,
-                              })
-                            }
-                            disabled={exercisesLoading}
-                          >
-                            <option value="">Seleziona esercizio</option>
-                            {options.map((ex) => (
-                              <option key={ex.exerciseId} value={ex.exerciseId}>
-                                {ex.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        {exercisesLoading ? <p>Caricamento esercizi...</p> : null}
-                        {exercisesError ? <p>Errore: {exercisesError}</p> : null}
+                        {searchLoading ? <p>Ricerca in corso...</p> : null}
+                        {searchError ? <p>Errore: {searchError}</p> : null}
                         {showNoResults ? <p>Nessun risultato.</p> : null}
+
+                        {searchActive && suggestions.length > 0 ? (
+                          <div
+                            style={{
+                              display: "grid",
+                              gap: 6,
+                              padding: 8,
+                              borderRadius: 10,
+                              border: "1px solid #eee",
+                              background: "#fafafa",
+                            }}
+                          >
+                            {suggestions.map((ex) => (
+                              <button
+                                key={ex.exerciseId}
+                                type="button"
+                                onClick={() =>
+                                  handleExerciseSelect(
+                                    "edit",
+                                    setEditForm,
+                                    blockIndex,
+                                    rowIndex,
+                                    ex
+                                  )
+                                }
+                                style={{
+                                  textAlign: "left",
+                                  padding: "6px 8px",
+                                  borderRadius: 8,
+                                  border: "1px solid #ddd",
+                                  background: "#fff",
+                                }}
+                              >
+                                {ex.name}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        <div style={{ display: "grid", gap: 6 }}>
+                          <span>Esercizio *</span>
+                          <div
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: 10,
+                              border: "1px solid #ddd",
+                              background: "#fff",
+                            }}
+                          >
+                            {selected ? selected.name : "Nessun esercizio selezionato"}
+                          </div>
+                        </div>
 
                         {isRunErg ? (
                           <div
@@ -1281,15 +1462,6 @@ export default function CoachSessionTemplatesPage() {
           )}
 
           {editErr ? <p>Errore: {editErr}</p> : null}
-
-          <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" onClick={handleSaveTemplate} disabled={editBusy || editLoading}>
-              {editBusy ? "Salvo..." : "Salva"}
-            </button>
-            <button type="button" onClick={cancelEdit} disabled={editBusy}>
-              Annulla
-            </button>
-          </div>
         </section>
       ) : null}
 
