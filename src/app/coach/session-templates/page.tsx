@@ -196,10 +196,11 @@ function validateTemplateForm(form: TemplateForm): string | null {
         return "Kg non validi.";
       }
       const hasCoachNote = row.notesPrivate.trim().length > 0;
+      const hasPublicNote = row.notesPublic.trim().length > 0;
       const hasPercent = row.percent.trim().length > 0;
       const hasKg = row.kg.trim().length > 0;
-      if (!hasCoachNote && !hasPercent && !hasKg) {
-        return "Ogni riga deve avere almeno nota coach, % o kg.";
+      if (!hasCoachNote && !hasPublicNote && !hasPercent && !hasKg) {
+        return "Ogni riga deve avere almeno nota pubblica/privata, % o kg.";
       }
     }
   }
@@ -260,6 +261,8 @@ export default function CoachSessionTemplatesPage() {
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(true);
   const [templatesError, setTemplatesError] = useState("");
+  const [templatesActionError, setTemplatesActionError] = useState("");
+  const [templateBusyId, setTemplateBusyId] = useState<string | null>(null);
 
   const [exercises, setExercises] = useState<ExerciseRow[]>([]);
   const [exercisesLoading, setExercisesLoading] = useState(true);
@@ -275,6 +278,11 @@ export default function CoachSessionTemplatesPage() {
   const [editLoading, setEditLoading] = useState(false);
   const [editErr, setEditErr] = useState("");
   const [editBusy, setEditBusy] = useState(false);
+
+  const [viewId, setViewId] = useState<string | null>(null);
+  const [viewTemplate, setViewTemplate] = useState<TemplateDetail | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [viewErr, setViewErr] = useState("");
 
   async function loadExercises() {
     setExercisesLoading(true);
@@ -304,6 +312,7 @@ export default function CoachSessionTemplatesPage() {
   async function loadTemplates() {
     setTemplatesLoading(true);
     setTemplatesError("");
+    setTemplatesActionError("");
     try {
       const r = await fetch("/api/coach/session-templates", { cache: "no-store" });
       const data = await r.json().catch(() => null);
@@ -339,6 +348,10 @@ export default function CoachSessionTemplatesPage() {
     });
     return map;
   }, [exercises]);
+
+  function isEnduranceCategory(category?: string) {
+    return category === "RUN" || category === "ERG";
+  }
 
   function addBlock(setForm: Dispatch<SetStateAction<TemplateForm>>) {
     setForm((prev) => ({
@@ -514,6 +527,69 @@ export default function CoachSessionTemplatesPage() {
     }
   }
 
+  async function handleViewTemplate(templateId: string) {
+    setViewErr("");
+    setViewLoading(true);
+    setViewId(templateId);
+    try {
+      const r = await fetch(`/api/coach/session-templates/${templateId}`, {
+        cache: "no-store",
+      });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        const msg =
+          (data && (data.error || data.message)) ||
+          `Errore caricamento template (${r.status})`;
+        throw new Error(msg);
+      }
+      const normalized = normalizeTemplateDetail(data);
+      if (!normalized) throw new Error("Risposta template non valida.");
+      setViewTemplate(normalized);
+    } catch (e) {
+      setViewErr(e instanceof Error ? e.message : "Errore sconosciuto.");
+      setViewId(null);
+      setViewTemplate(null);
+    } finally {
+      setViewLoading(false);
+    }
+  }
+
+  function closeView() {
+    setViewId(null);
+    setViewErr("");
+    setViewTemplate(null);
+  }
+
+  async function handleDeleteTemplate(templateId: string) {
+    if (!confirm("Eliminare questo template?")) return;
+    setTemplatesActionError("");
+    setTemplateBusyId(templateId);
+    try {
+      const r = await fetch(`/api/coach/session-templates/${templateId}`, {
+        method: "DELETE",
+      });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        const msg =
+          (data && (data.error || data.message)) ||
+          `Errore eliminazione template (${r.status})`;
+        throw new Error(msg);
+      }
+      if (editId === templateId) {
+        setEditId(null);
+        setEditForm(createEmptyForm());
+      }
+      if (viewId === templateId) {
+        closeView();
+      }
+      await loadTemplates();
+    } catch (e) {
+      setTemplatesActionError(e instanceof Error ? e.message : "Errore sconosciuto.");
+    } finally {
+      setTemplateBusyId(null);
+    }
+  }
+
   return (
     <main style={{ maxWidth: 980, margin: "36px auto", padding: 16 }}>
       <section>
@@ -550,35 +626,56 @@ export default function CoachSessionTemplatesPage() {
           <p>Nessun template in libreria.</p>
         ) : null}
 
+        {templatesActionError ? <p>Errore: {templatesActionError}</p> : null}
+
         <div style={{ display: "grid", gap: 8 }}>
-          {templates.map((tpl) => (
-            <div
-              key={tpl.sessionTemplateId}
-              style={{
-                padding: 12,
-                borderRadius: 12,
-                border: "1px solid #eee",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 12,
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 900 }}>{tpl.title}</div>
-                <div style={{ fontSize: 12, opacity: 0.7 }}>
-                  Aggiornato: {tpl.updatedAt ? tpl.updatedAt : "N/D"}
+          {templates.map((tpl) => {
+            const rowBusy = templateBusyId === tpl.sessionTemplateId;
+            return (
+              <div
+                key={tpl.sessionTemplateId}
+                style={{
+                  padding: 12,
+                  borderRadius: 12,
+                  border: "1px solid #eee",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 900 }}>{tpl.title}</div>
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>
+                    Aggiornato: {tpl.updatedAt ? tpl.updatedAt : "N/D"}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={() => handleViewTemplate(tpl.sessionTemplateId)}
+                    disabled={editLoading || rowBusy}
+                  >
+                    Visualizza
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => startEdit(tpl.sessionTemplateId)}
+                    disabled={editLoading || rowBusy}
+                  >
+                    Modifica
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteTemplate(tpl.sessionTemplateId)}
+                    disabled={rowBusy}
+                  >
+                    {rowBusy ? "Elimino..." : "Elimina"}
+                  </button>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => startEdit(tpl.sessionTemplateId)}
-                disabled={editLoading}
-              >
-                Modifica
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 
@@ -666,6 +763,8 @@ export default function CoachSessionTemplatesPage() {
                     ) {
                       options = [selected, ...options];
                     }
+                    const isRunErg = isEnduranceCategory(selected?.category);
+                    const showNoResults = !exercisesLoading && options.length === 0;
                     return (
                       <div
                         key={`new-row-${blockIndex}-${rowIndex}`}
@@ -722,64 +821,115 @@ export default function CoachSessionTemplatesPage() {
 
                         {exercisesLoading ? <p>Caricamento esercizi...</p> : null}
                         {exercisesError ? <p>Errore: {exercisesError}</p> : null}
+                        {showNoResults ? <p>Nessun risultato.</p> : null}
 
-                        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
-                          <label style={{ display: "grid", gap: 6 }}>
-                            <span>Set</span>
-                            <input
-                              value={row.sets}
-                              onChange={(e) =>
-                                updateRow(setNewForm, blockIndex, rowIndex, {
-                                  sets: e.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                          <label style={{ display: "grid", gap: 6 }}>
-                            <span>Reps</span>
-                            <input
-                              value={row.reps}
-                              onChange={(e) =>
-                                updateRow(setNewForm, blockIndex, rowIndex, {
-                                  reps: e.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                          <label style={{ display: "grid", gap: 6 }}>
-                            <span>Rest</span>
-                            <input
-                              value={row.rest}
-                              onChange={(e) =>
-                                updateRow(setNewForm, blockIndex, rowIndex, {
-                                  rest: e.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                          <label style={{ display: "grid", gap: 6 }}>
-                            <span>%</span>
-                            <input
-                              value={row.percent}
-                              onChange={(e) =>
-                                updateRow(setNewForm, blockIndex, rowIndex, {
-                                  percent: e.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                          <label style={{ display: "grid", gap: 6 }}>
-                            <span>Kg</span>
-                            <input
-                              value={row.kg}
-                              onChange={(e) =>
-                                updateRow(setNewForm, blockIndex, rowIndex, {
-                                  kg: e.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                        </div>
+                        {isRunErg ? (
+                          <div
+                            style={{
+                              display: "grid",
+                              gap: 8,
+                              gridTemplateColumns: "1fr 1fr 1fr",
+                            }}
+                          >
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Durata</span>
+                              <input
+                                value={row.sets}
+                                onChange={(e) =>
+                                  updateRow(setNewForm, blockIndex, rowIndex, {
+                                    sets: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Zona HR</span>
+                              <input
+                                value={row.reps}
+                                onChange={(e) =>
+                                  updateRow(setNewForm, blockIndex, rowIndex, {
+                                    reps: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Passo</span>
+                              <input
+                                value={row.rest}
+                                onChange={(e) =>
+                                  updateRow(setNewForm, blockIndex, rowIndex, {
+                                    rest: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              display: "grid",
+                              gap: 8,
+                              gridTemplateColumns: "1fr 1fr",
+                            }}
+                          >
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Set</span>
+                              <input
+                                value={row.sets}
+                                onChange={(e) =>
+                                  updateRow(setNewForm, blockIndex, rowIndex, {
+                                    sets: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Reps</span>
+                              <input
+                                value={row.reps}
+                                onChange={(e) =>
+                                  updateRow(setNewForm, blockIndex, rowIndex, {
+                                    reps: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Rest</span>
+                              <input
+                                value={row.rest}
+                                onChange={(e) =>
+                                  updateRow(setNewForm, blockIndex, rowIndex, {
+                                    rest: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>%</span>
+                              <input
+                                value={row.percent}
+                                onChange={(e) =>
+                                  updateRow(setNewForm, blockIndex, rowIndex, {
+                                    percent: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Kg</span>
+                              <input
+                                value={row.kg}
+                                onChange={(e) =>
+                                  updateRow(setNewForm, blockIndex, rowIndex, {
+                                    kg: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+                        )}
 
                         <label style={{ display: "grid", gap: 6 }}>
                           <span>Note pubbliche</span>
@@ -924,6 +1074,8 @@ export default function CoachSessionTemplatesPage() {
                     ) {
                       options = [selected, ...options];
                     }
+                    const isRunErg = isEnduranceCategory(selected?.category);
+                    const showNoResults = !exercisesLoading && options.length === 0;
                     return (
                       <div
                         key={`edit-row-${blockIndex}-${rowIndex}`}
@@ -980,64 +1132,115 @@ export default function CoachSessionTemplatesPage() {
 
                         {exercisesLoading ? <p>Caricamento esercizi...</p> : null}
                         {exercisesError ? <p>Errore: {exercisesError}</p> : null}
+                        {showNoResults ? <p>Nessun risultato.</p> : null}
 
-                        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
-                          <label style={{ display: "grid", gap: 6 }}>
-                            <span>Set</span>
-                            <input
-                              value={row.sets}
-                              onChange={(e) =>
-                                updateRow(setEditForm, blockIndex, rowIndex, {
-                                  sets: e.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                          <label style={{ display: "grid", gap: 6 }}>
-                            <span>Reps</span>
-                            <input
-                              value={row.reps}
-                              onChange={(e) =>
-                                updateRow(setEditForm, blockIndex, rowIndex, {
-                                  reps: e.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                          <label style={{ display: "grid", gap: 6 }}>
-                            <span>Rest</span>
-                            <input
-                              value={row.rest}
-                              onChange={(e) =>
-                                updateRow(setEditForm, blockIndex, rowIndex, {
-                                  rest: e.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                          <label style={{ display: "grid", gap: 6 }}>
-                            <span>%</span>
-                            <input
-                              value={row.percent}
-                              onChange={(e) =>
-                                updateRow(setEditForm, blockIndex, rowIndex, {
-                                  percent: e.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                          <label style={{ display: "grid", gap: 6 }}>
-                            <span>Kg</span>
-                            <input
-                              value={row.kg}
-                              onChange={(e) =>
-                                updateRow(setEditForm, blockIndex, rowIndex, {
-                                  kg: e.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                        </div>
+                        {isRunErg ? (
+                          <div
+                            style={{
+                              display: "grid",
+                              gap: 8,
+                              gridTemplateColumns: "1fr 1fr 1fr",
+                            }}
+                          >
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Durata</span>
+                              <input
+                                value={row.sets}
+                                onChange={(e) =>
+                                  updateRow(setEditForm, blockIndex, rowIndex, {
+                                    sets: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Zona HR</span>
+                              <input
+                                value={row.reps}
+                                onChange={(e) =>
+                                  updateRow(setEditForm, blockIndex, rowIndex, {
+                                    reps: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Passo</span>
+                              <input
+                                value={row.rest}
+                                onChange={(e) =>
+                                  updateRow(setEditForm, blockIndex, rowIndex, {
+                                    rest: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              display: "grid",
+                              gap: 8,
+                              gridTemplateColumns: "1fr 1fr",
+                            }}
+                          >
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Set</span>
+                              <input
+                                value={row.sets}
+                                onChange={(e) =>
+                                  updateRow(setEditForm, blockIndex, rowIndex, {
+                                    sets: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Reps</span>
+                              <input
+                                value={row.reps}
+                                onChange={(e) =>
+                                  updateRow(setEditForm, blockIndex, rowIndex, {
+                                    reps: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Rest</span>
+                              <input
+                                value={row.rest}
+                                onChange={(e) =>
+                                  updateRow(setEditForm, blockIndex, rowIndex, {
+                                    rest: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>%</span>
+                              <input
+                                value={row.percent}
+                                onChange={(e) =>
+                                  updateRow(setEditForm, blockIndex, rowIndex, {
+                                    percent: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <span>Kg</span>
+                              <input
+                                value={row.kg}
+                                onChange={(e) =>
+                                  updateRow(setEditForm, blockIndex, rowIndex, {
+                                    kg: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+                        )}
 
                         <label style={{ display: "grid", gap: 6 }}>
                           <span>Note pubbliche</span>
@@ -1085,6 +1288,107 @@ export default function CoachSessionTemplatesPage() {
             </button>
             <button type="button" onClick={cancelEdit} disabled={editBusy}>
               Annulla
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {viewId ? (
+        <section
+          style={{
+            marginTop: 18,
+            padding: 14,
+            borderRadius: 16,
+            border: "1px solid #e5e5e5",
+            display: "grid",
+            gap: 12,
+          }}
+        >
+          <h2 style={{ margin: 0 }}>Visualizza template</h2>
+          {viewLoading ? (
+            <p>Caricamento template...</p>
+          ) : viewTemplate ? (
+            <div style={{ display: "grid", gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 900 }}>{viewTemplate.title}</div>
+                <div style={{ fontSize: 12, opacity: 0.7 }}>
+                  Aggiornato: {viewTemplate.updatedAt ? viewTemplate.updatedAt : "N/D"}
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <div>
+                  <strong>Note pubbliche:</strong>{" "}
+                  {viewTemplate.notesPublic?.trim() ? viewTemplate.notesPublic : "-"}
+                </div>
+                <div>
+                  <strong>Note private:</strong>{" "}
+                  {viewTemplate.notesPrivate?.trim() ? viewTemplate.notesPrivate : "-"}
+                </div>
+              </div>
+
+              {viewTemplate.blocks.map((block, blockIndex) => (
+                <div
+                  key={`view-block-${blockIndex}`}
+                  style={{
+                    padding: 12,
+                    borderRadius: 12,
+                    border: "1px solid #ddd",
+                    display: "grid",
+                    gap: 10,
+                  }}
+                >
+                  <strong>
+                    Blocco {blockIndex + 1}: {block.name}
+                  </strong>
+                  {block.rows.length === 0 ? <p>Nessun esercizio.</p> : null}
+                  {block.rows.map((row, rowIndex) => {
+                    const ex = exercisesById[row.exerciseId];
+                    const isRunErg = isEnduranceCategory(ex?.category);
+                    return (
+                      <div
+                        key={`view-row-${blockIndex}-${rowIndex}`}
+                        style={{
+                          padding: 10,
+                          borderRadius: 10,
+                          border: "1px solid #eee",
+                          display: "grid",
+                          gap: 6,
+                        }}
+                      >
+                        <div style={{ fontWeight: 700 }}>
+                          {rowIndex + 1}. {ex?.name || row.exerciseId}
+                          {ex?.category ? ` (${ex.category})` : ""}
+                        </div>
+                        {isRunErg ? (
+                          <div style={{ display: "grid", gap: 6 }}>
+                            <div>Durata: {row.sets || "-"}</div>
+                            <div>Zona HR: {row.reps || "-"}</div>
+                            <div>Passo: {row.rest || "-"}</div>
+                          </div>
+                        ) : (
+                          <div style={{ display: "grid", gap: 6 }}>
+                            <div>Set: {row.sets || "-"}</div>
+                            <div>Reps: {row.reps || "-"}</div>
+                            <div>Rest: {row.rest || "-"}</div>
+                            <div>%: {row.percent ?? "-"}</div>
+                            <div>Kg: {row.kg ?? "-"}</div>
+                          </div>
+                        )}
+                        <div>Note pubbliche: {row.notesPublic || "-"}</div>
+                        <div>Note private: {row.notesPrivate || "-"}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {viewErr ? <p>Errore: {viewErr}</p> : null}
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" onClick={closeView} disabled={viewLoading}>
+              Chiudi
             </button>
           </div>
         </section>
