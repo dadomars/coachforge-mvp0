@@ -21,6 +21,7 @@ model Coach {
   events       Event[]
   exercises    Exercise[]
   sessionTemplates SessionTemplate[]
+  assignedSessions AssignedSession[]
 
   @@map("coach")
 }
@@ -44,6 +45,7 @@ model Athlete {
   competitions           Competition[]
   competitionAssignments CompetitionAssignment[]
   eventAssignments       EventAssignment[]
+  assignedSessions       AssignedSession[]
 
   @@index([coachId], map: "idx_athlete_coach_id")
   @@map("athlete")
@@ -154,6 +156,7 @@ model Exercise {
 
   coach Coach @relation(fields: [coachId], references: [coachId], onDelete: Cascade)
   sessionTemplateRows SessionTemplateExerciseRow[]
+  assignedSessionRows AssignedSessionRow[]
 
   @@unique([coachId, name], map: "uq_exercise_coach_name")
   @@index([coachId], map: "idx_exercise_coach_id")
@@ -172,6 +175,7 @@ model SessionTemplate {
 
   coach  Coach                  @relation(fields: [coachId], references: [coachId], onDelete: Cascade)
   blocks SessionTemplateBlock[]
+  assignedSessions AssignedSession[]
 
   @@index([coachId], map: "idx_session_template_coach_id")
   @@map("session_template")
@@ -211,6 +215,60 @@ model SessionTemplateExerciseRow {
   @@index([exerciseId], map: "idx_session_template_row_exercise_id")
   @@index([sortOrder], map: "idx_session_template_row_sort_order")
   @@map("session_template_row")
+}
+
+model AssignedSession {
+  assignedSessionId String   @id @default(cuid()) @map("assigned_session_id")
+  coachId           String   @map("coach_id")
+  athleteId         String   @map("athlete_id")
+  templateId        String?  @map("template_id")
+  date              DateTime @map("date")
+  title             String   @map("title")
+  notesPublic       String   @default("") @map("notes_public")
+  notesPrivate      String   @default("") @map("notes_private")
+  status            EventStatus @default(PLANNED) @map("status")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  coach     Coach          @relation(fields: [coachId], references: [coachId], onDelete: Cascade)
+  athlete   Athlete        @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
+  template  SessionTemplate? @relation(fields: [templateId], references: [sessionTemplateId], onDelete: SetNull)
+  blocks    AssignedSessionBlock[]
+
+  @@index([athleteId, date], map: "idx_assigned_session_athlete_date")
+  @@index([coachId], map: "idx_assigned_session_coach_id")
+  @@map("assigned_session")
+}
+
+model AssignedSessionBlock {
+  blockId           String @id @default(cuid()) @map("block_id")
+  assignedSessionId String @map("assigned_session_id")
+  name              String @map("name")
+  sortOrder         Int    @map("sort_order")
+
+  session AssignedSession @relation(fields: [assignedSessionId], references: [assignedSessionId], onDelete: Cascade)
+  rows    AssignedSessionRow[]
+
+  @@map("assigned_session_block")
+}
+
+model AssignedSessionRow {
+  rowId      String  @id @default(cuid()) @map("row_id")
+  blockId    String  @map("block_id")
+  exerciseId String  @map("exercise_id")
+  sortOrder  Int     @map("sort_order")
+  sets       String? @map("sets")
+  reps       String? @map("reps")
+  rest       String? @map("rest")
+  percent    Float?  @map("percent")
+  kg         Float?  @map("kg")
+  notesPublic  String? @map("notes_public")
+  notesPrivate String? @map("notes_private")
+
+  block    AssignedSessionBlock @relation(fields: [blockId], references: [blockId], onDelete: Cascade)
+  exercise Exercise             @relation(fields: [exerciseId], references: [exerciseId], onDelete: Cascade)
+
+  @@map("assigned_session_row")
 }
 
 model CompetitionAssignment {
