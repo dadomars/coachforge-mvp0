@@ -1,15 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-type AssignedSessionRow = {
+type SessionRow = {
   sessionId: string;
-  athleteId: string;
-  athleteName: string;
-  date: string;
   title: string;
-  status: string;
+  sessionDate: string | null;
+  assignedCount: number;
 };
 
 type AthleteRow = {
@@ -18,21 +16,31 @@ type AthleteRow = {
   lastName: string;
 };
 
+type AssignmentRow = {
+  assignmentId: string;
+  athleteId: string;
+  athleteName: string;
+  assignedAt: string;
+};
+
 function asString(value: unknown): string {
   return typeof value === "string" ? value : value == null ? "" : String(value);
 }
 
-function normalizeSession(value: unknown): AssignedSessionRow | null {
+function normalizeSession(value: unknown): SessionRow | null {
   if (!value || typeof value !== "object") return null;
   const rec = value as Record<string, unknown>;
   const sessionId = asString(rec.sessionId);
-  const athleteId = asString(rec.athleteId);
-  const athleteName = asString(rec.athleteName);
-  const date = asString(rec.date);
   const title = asString(rec.title);
-  const status = asString(rec.status);
-  if (!sessionId || !athleteId || !date || !title) return null;
-  return { sessionId, athleteId, athleteName, date, title, status };
+  const sessionDate = asString(rec.sessionDate);
+  const assignedCount = Number(rec.assignedCount ?? 0);
+  if (!sessionId || !title) return null;
+  return {
+    sessionId,
+    title,
+    sessionDate: sessionDate || null,
+    assignedCount: Number.isFinite(assignedCount) ? assignedCount : 0,
+  };
 }
 
 function normalizeAthlete(value: unknown): AthleteRow | null {
@@ -45,13 +53,30 @@ function normalizeAthlete(value: unknown): AthleteRow | null {
   return { athleteId, firstName, lastName };
 }
 
-function formatDate(value: string) {
+function normalizeAssignment(value: unknown): AssignmentRow | null {
+  if (!value || typeof value !== "object") return null;
+  const rec = value as Record<string, unknown>;
+  const assignmentId = asString(rec.assignmentId);
+  const athleteId = asString(rec.athleteId);
+  const athleteName = asString(rec.athleteName);
+  const assignedAt = asString(rec.assignedAt);
+  if (!assignmentId || !athleteId) return null;
+  return { assignmentId, athleteId, athleteName, assignedAt };
+}
+
+function formatDate(value: string | null) {
   if (!value) return "";
   return value.length >= 10 ? value.slice(0, 10) : value;
 }
 
+function sortAthletes(a: AthleteRow, b: AthleteRow) {
+  const aName = `${a.firstName} ${a.lastName}`.toLowerCase();
+  const bName = `${b.firstName} ${b.lastName}`.toLowerCase();
+  return aName.localeCompare(bName);
+}
+
 export default function CoachAssignedSessionsPage() {
-  const [list, setList] = useState<AssignedSessionRow[]>([]);
+  const [list, setList] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -59,18 +84,20 @@ export default function CoachAssignedSessionsPage() {
   const [athletesLoading, setAthletesLoading] = useState(true);
   const [athletesError, setAthletesError] = useState("");
 
-  const [showForm, setShowForm] = useState(false);
-  const [formAthleteId, setFormAthleteId] = useState("");
-  const [formDate, setFormDate] = useState("");
-  const [formTitle, setFormTitle] = useState("");
-  const [formError, setFormError] = useState("");
-  const [formBusy, setFormBusy] = useState(false);
+  const [assignSessionId, setAssignSessionId] = useState<string | null>(null);
+  const [assignDate, setAssignDate] = useState("");
+  const [assignSearch, setAssignSearch] = useState("");
+  const [assignSelected, setAssignSelected] = useState<Record<string, boolean>>({});
+  const [assignedList, setAssignedList] = useState<AssignmentRow[]>([]);
+  const [assignedLoading, setAssignedLoading] = useState(false);
+  const [assignedError, setAssignedError] = useState("");
+  const [assignBusy, setAssignBusy] = useState(false);
 
   async function loadSessions() {
     setLoading(true);
     setError("");
     try {
-      const r = await fetch("/api/coach/assigned-sessions", { cache: "no-store" });
+      const r = await fetch("/api/coach/sessions", { cache: "no-store" });
       const data = await r.json().catch(() => null);
       if (!r.ok) {
         const msg =
@@ -81,7 +108,7 @@ export default function CoachAssignedSessionsPage() {
       if (!Array.isArray(data)) throw new Error("Risposta sessioni non valida.");
       const normalized = data
         .map((row: unknown) => normalizeSession(row))
-        .filter(Boolean) as AssignedSessionRow[];
+        .filter(Boolean) as SessionRow[];
       setList(normalized);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Errore sconosciuto.");
@@ -122,51 +149,146 @@ export default function CoachAssignedSessionsPage() {
     loadAthletes();
   }, []);
 
-  async function handleCreateSession(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setFormError("");
-    if (!formAthleteId) {
-      setFormError("Seleziona un atleta.");
-      return;
-    }
-    if (!formDate) {
-      setFormError("Seleziona una data.");
-      return;
-    }
-    if (!formTitle.trim()) {
-      setFormError("Titolo obbligatorio.");
-      return;
-    }
-    setFormBusy(true);
+  async function loadAssignments(sessionId: string) {
+    setAssignedLoading(true);
+    setAssignedError("");
     try {
-      const payload = {
-        athleteId: formAthleteId,
-        date: formDate,
-        title: formTitle.trim(),
-      };
-      const r = await fetch("/api/coach/assigned-sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+      const r = await fetch(`/api/coach/sessions/${sessionId}/assignments`, {
+        cache: "no-store",
       });
       const data = await r.json().catch(() => null);
       if (!r.ok) {
         const msg =
           (data && (data.error || data.message)) ||
-          `Errore creazione sessione (${r.status})`;
+          `Errore caricamento assegnazioni (${r.status})`;
         throw new Error(msg);
       }
-      setFormAthleteId("");
-      setFormDate("");
-      setFormTitle("");
-      setShowForm(false);
-      await loadSessions();
+      if (!Array.isArray(data)) throw new Error("Risposta assegnazioni non valida.");
+      const normalized = data
+        .map((row: unknown) => normalizeAssignment(row))
+        .filter(Boolean) as AssignmentRow[];
+      setAssignedList(normalized);
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : "Errore sconosciuto.");
+      setAssignedError(e instanceof Error ? e.message : "Errore sconosciuto.");
+      setAssignedList([]);
     } finally {
-      setFormBusy(false);
+      setAssignedLoading(false);
     }
   }
+
+  function openAssignPanel(sessionId: string, sessionDate: string | null) {
+    setAssignSessionId(sessionId);
+    setAssignDate(formatDate(sessionDate));
+    setAssignSearch("");
+    setAssignSelected({});
+    loadAssignments(sessionId);
+  }
+
+  async function handleAssignAthletes() {
+    if (!assignSessionId) return;
+    setAssignedError("");
+    if (!assignDate) {
+      setAssignedError("Seleziona una data sessione.");
+      return;
+    }
+    const selectedIds = Object.keys(assignSelected).filter((id) => assignSelected[id]);
+    if (selectedIds.length === 0) {
+      setAssignedError("Seleziona almeno un atleta.");
+      return;
+    }
+    setAssignBusy(true);
+    try {
+      const dateUpdate = await fetch(`/api/coach/sessions/${assignSessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionDate: assignDate }),
+      });
+      const dateData = await dateUpdate.json().catch(() => null);
+      if (!dateUpdate.ok) {
+        const msg =
+          (dateData && (dateData.error || dateData.message)) ||
+          `Errore aggiornamento data (${dateUpdate.status})`;
+        throw new Error(msg);
+      }
+
+      const r = await fetch(`/api/coach/sessions/${assignSessionId}/assignments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ athleteIds: selectedIds }),
+      });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        const msg =
+          (data && (data.error || data.message)) ||
+          `Errore assegnazione (${r.status})`;
+        throw new Error(msg);
+      }
+      setAssignSelected({});
+      await loadAssignments(assignSessionId);
+      await loadSessions();
+    } catch (e) {
+      setAssignedError(e instanceof Error ? e.message : "Errore sconosciuto.");
+    } finally {
+      setAssignBusy(false);
+    }
+  }
+
+  async function handleRemoveAssignment(assignmentId: string) {
+    if (!assignSessionId) return;
+    setAssignedError("");
+    setAssignBusy(true);
+    try {
+      const r = await fetch(`/api/coach/sessions/${assignSessionId}/assignments`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignmentId }),
+      });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        const msg =
+          (data && (data.error || data.message)) ||
+          `Errore rimozione (${r.status})`;
+        throw new Error(msg);
+      }
+      await loadAssignments(assignSessionId);
+      await loadSessions();
+    } catch (e) {
+      setAssignedError(e instanceof Error ? e.message : "Errore sconosciuto.");
+    } finally {
+      setAssignBusy(false);
+    }
+  }
+
+  async function handleDeleteSession(sessionId: string) {
+    if (!confirm("Eliminare questa sessione?")) return;
+    setError("");
+    try {
+      const r = await fetch(`/api/coach/sessions/${sessionId}`, { method: "DELETE" });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        const msg =
+          (data && (data.error || data.message)) ||
+          `Errore eliminazione sessione (${r.status})`;
+        throw new Error(msg);
+      }
+      await loadSessions();
+      if (assignSessionId === sessionId) {
+        setAssignSessionId(null);
+        setAssignedList([]);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Errore sconosciuto.");
+    }
+  }
+
+  const filteredAthletes = useMemo(() => {
+    const q = assignSearch.trim().toLowerCase();
+    const sorted = [...athletes].sort(sortAthletes);
+    if (!q) return sorted;
+    return sorted.filter((athlete) =>
+      `${athlete.firstName} ${athlete.lastName}`.toLowerCase().includes(q)
+    );
+  }, [assignSearch, athletes]);
 
   return (
     <main style={{ maxWidth: 980, margin: "36px auto", padding: 16 }}>
@@ -174,92 +296,41 @@ export default function CoachAssignedSessionsPage() {
         <Link href="/coach" style={{ textDecoration: "underline" }}>
           ← Torna al coach
         </Link>
-        <h1 style={{ fontSize: 28, fontWeight: 900 }}>Sessioni assegnate</h1>
+        <h1 style={{ fontSize: 28, fontWeight: 900 }}>Sessioni</h1>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button type="button" onClick={loadSessions} disabled={loading}>
             Aggiorna lista
           </button>
-          <button type="button" onClick={() => setShowForm(true)}>
-            + Nuova sessione
-          </button>
-        </div>
-
-        {showForm ? (
-          <form
-            onSubmit={handleCreateSession}
+          <Link
+            href="/coach/assigned-sessions/new"
             style={{
-              padding: 12,
-              borderRadius: 12,
-              border: "1px solid #eee",
-              display: "grid",
-              gap: 10,
-              maxWidth: 520,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "8px 12px",
+              borderRadius: 10,
+              border: "1px solid #ccc",
+              background: "#fff",
+              textDecoration: "none",
+              color: "inherit",
+              fontWeight: 600,
             }}
           >
-            <label style={{ display: "grid", gap: 6 }}>
-              <span>Atleta</span>
-              <select
-                value={formAthleteId}
-                onChange={(e) => setFormAthleteId(e.target.value)}
-                disabled={athletesLoading}
-              >
-                <option value="">Seleziona atleta</option>
-                {athletes.map((athlete) => (
-                  <option key={athlete.athleteId} value={athlete.athleteId}>
-                    {athlete.firstName} {athlete.lastName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: "grid", gap: 6 }}>
-              <span>Data</span>
-              <input
-                type="date"
-                value={formDate}
-                onChange={(e) => setFormDate(e.target.value)}
-              />
-            </label>
-            <label style={{ display: "grid", gap: 6 }}>
-              <span>Titolo</span>
-              <input
-                value={formTitle}
-                onChange={(e) => setFormTitle(e.target.value)}
-              />
-            </label>
-
-            {athletesLoading ? <p>Caricamento atleti...</p> : null}
-            {athletesError ? <p>Errore: {athletesError}</p> : null}
-            {formError ? <p>Errore: {formError}</p> : null}
-
-            <div style={{ display: "flex", gap: 8 }}>
-              <button type="submit" disabled={formBusy}>
-                {formBusy ? "Creo..." : "Crea sessione"}
-              </button>
-              <button
-                type="button"
-                disabled={formBusy}
-                onClick={() => {
-                  setShowForm(false);
-                  setFormError("");
-                  setFormAthleteId("");
-                  setFormDate("");
-                  setFormTitle("");
-                }}
-              >
-                Annulla
-              </button>
-            </div>
-          </form>
-        ) : null}
+            Crea sessione
+          </Link>
+        </div>
 
         {loading ? (
           <p>Caricamento sessioni...</p>
         ) : error ? (
           <p>Errore: {error}</p>
         ) : list.length === 0 ? (
-          <p>Nessuna sessione assegnata</p>
+          <p>Nessuna sessione</p>
         ) : null}
+
+        {athletesLoading ? <p>Caricamento atleti...</p> : null}
+        {athletesError ? <p>Errore: {athletesError}</p> : null}
 
         {list.length > 0 ? (
           <div style={{ overflowX: "auto" }}>
@@ -267,16 +338,13 @@ export default function CoachAssignedSessionsPage() {
               <thead>
                 <tr>
                   <th style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>
-                    Atleta
-                  </th>
-                  <th style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>
                     Titolo
                   </th>
                   <th style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>
                     Data
                   </th>
                   <th style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>
-                    Status
+                    Atleti
                   </th>
                   <th style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>
                     Azioni
@@ -286,20 +354,137 @@ export default function CoachAssignedSessionsPage() {
               <tbody>
                 {list.map((row) => (
                   <tr key={row.sessionId}>
-                    <td style={{ padding: "6px 4px" }}>{row.athleteName || "-"}</td>
                     <td style={{ padding: "6px 4px" }}>{row.title}</td>
-                    <td style={{ padding: "6px 4px" }}>{formatDate(row.date)}</td>
-                    <td style={{ padding: "6px 4px" }}>{row.status}</td>
-                    <td style={{ padding: "6px 4px" }}>
-                      <Link href={`/coach/assigned-sessions/${row.sessionId}`}>
+                    <td style={{ padding: "6px 4px" }}>{formatDate(row.sessionDate)}</td>
+                    <td style={{ padding: "6px 4px" }}>{row.assignedCount}</td>
+                    <td style={{ padding: "6px 4px", display: "flex", gap: 8 }}>
+                      <Link
+                        href={`/coach/assigned-sessions/${row.sessionId}`}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          padding: "6px 10px",
+                          borderRadius: 8,
+                          border: "1px solid #ccc",
+                          background: "#fff",
+                          textDecoration: "none",
+                          color: "inherit",
+                          fontWeight: 600,
+                        }}
+                      >
                         Apri
                       </Link>
+                      <button
+                        type="button"
+                        onClick={() => openAssignPanel(row.sessionId, row.sessionDate)}
+                      >
+                        Assegna
+                      </button>
+                      <button type="button" onClick={() => handleDeleteSession(row.sessionId)}>
+                        Elimina
+                      </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        ) : null}
+
+        {assignSessionId ? (
+          <section
+            style={{
+              marginTop: 16,
+              padding: 12,
+              borderRadius: 12,
+              border: "1px solid #eee",
+              display: "grid",
+              gap: 12,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <strong>Assegna sessione</strong>
+              <button
+                type="button"
+                onClick={() => {
+                  setAssignSessionId(null);
+                  setAssignDate("");
+                  setAssignedError("");
+                }}
+              >
+                Chiudi
+              </button>
+            </div>
+
+            <label style={{ display: "grid", gap: 6 }}>
+              <span>Data sessione</span>
+              <input
+                type="date"
+                value={assignDate}
+                onChange={(e) => setAssignDate(e.target.value)}
+              />
+            </label>
+
+            <label style={{ display: "grid", gap: 6 }}>
+              <span>Cerca atleta</span>
+              <input
+                value={assignSearch}
+                onChange={(e) => setAssignSearch(e.target.value)}
+                placeholder="Cerca atleta"
+              />
+            </label>
+
+            <div style={{ display: "grid", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+              {filteredAthletes.map((athlete) => (
+                <label
+                  key={athlete.athleteId}
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!assignSelected[athlete.athleteId]}
+                    onChange={(e) =>
+                      setAssignSelected((prev) => ({
+                        ...prev,
+                        [athlete.athleteId]: e.target.checked,
+                      }))
+                    }
+                  />
+                  {athlete.firstName} {athlete.lastName}
+                </label>
+              ))}
+            </div>
+
+            <button type="button" onClick={handleAssignAthletes} disabled={assignBusy}>
+              {assignBusy ? "Assegno..." : "Conferma assegnazione"}
+            </button>
+
+            {assignedLoading ? <p>Caricamento assegnazioni...</p> : null}
+            {assignedError ? <p>Errore: {assignedError}</p> : null}
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <strong>Atleti assegnati</strong>
+              {assignedList.length === 0 ? (
+                <p>Nessun atleta assegnato.</p>
+              ) : (
+                assignedList.map((row) => (
+                  <div
+                    key={row.assignmentId}
+                    style={{ display: "flex", justifyContent: "space-between", gap: 8 }}
+                  >
+                    <span>{row.athleteName || row.athleteId}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAssignment(row.assignmentId)}
+                      disabled={assignBusy}
+                    >
+                      Rimuovi
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
         ) : null}
       </section>
     </main>
