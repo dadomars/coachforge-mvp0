@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import ForbiddenBanner from "@/components/ForbiddenBanner";
@@ -263,7 +264,7 @@ export default function CoachAthletesPage() {
           >
             Template sessioni
           </a>
-          <a
+          <Link
             href="/coach/assigned-sessions"
             style={{
               padding: "10px 12px",
@@ -276,7 +277,7 @@ export default function CoachAthletesPage() {
             }}
           >
             Sessioni assegnate
-          </a>
+          </Link>
         </div>
 
         <p style={{ opacity: 0.8, marginTop: 6 }}>

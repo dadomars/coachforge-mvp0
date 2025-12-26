@@ -92,6 +92,8 @@ export default function CoachExercisesPage() {
   const searchParams = useSearchParams();
   const initRef = useRef(false);
   const [returnTo, setReturnTo] = useState<string | null>(null);
+  const [popupNotice, setPopupNotice] = useState<string>("");
+  const isPopup = searchParams.get("popup") === "1";
   const [forbidden, setForbidden] = useState<string | null>(null);
   const bannerText =
     forbidden === "athlete"
@@ -210,6 +212,31 @@ export default function CoachExercisesPage() {
         setNewFormErr(getErrorMessage(data, `Errore creazione esercizio (${r.status})`));
         return;
       }
+      if (isPopup) {
+        const created = normalizeExercise(data);
+        if (window.opener && created) {
+          window.opener.postMessage(
+            {
+              type: "CF_EXERCISE_CREATED",
+              exercise: {
+                exerciseId: created.exerciseId,
+                name: created.name,
+                category: created.category,
+              },
+            },
+            window.location.origin
+          );
+          window.close();
+          setTimeout(() => {
+            if (!window.closed) {
+              setPopupNotice("Esercizio creato ✅ Puoi chiudere questa finestra.");
+            }
+          }, 200);
+          return;
+        }
+        setPopupNotice("Esercizio creato ✅ Puoi chiudere questa finestra.");
+        return;
+      }
       if (returnTo) {
         router.replace(returnTo);
         return;
@@ -283,6 +310,11 @@ export default function CoachExercisesPage() {
         </div>
         <h1 style={{ fontSize: 28, fontWeight: 900 }}>Libreria Esercizi</h1>
         <ForbiddenBanner text={bannerText} />
+        {popupNotice ? (
+          <p style={{ marginTop: 8, padding: "6px 8px", background: "#f7f7f7" }}>
+            {popupNotice}
+          </p>
+        ) : null}
       </section>
 
       <section
