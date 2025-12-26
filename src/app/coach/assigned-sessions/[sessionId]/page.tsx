@@ -11,6 +11,7 @@ type ExerciseRow = {
 };
 
 type SessionRow = {
+  rowId: string;
   exerciseId: string;
   sets?: string | null;
   reps?: string | null;
@@ -104,9 +105,11 @@ function normalizeSessionDetail(value: unknown): SessionDetail | null {
         .map((row) => {
           if (!row || typeof row !== "object") return null;
           const rowRec = row as Record<string, unknown>;
+          const rowId = asString(rowRec.rowId);
           const exerciseId = asString(rowRec.exerciseId);
-          if (!exerciseId) return null;
+          if (!rowId || !exerciseId) return null;
           return {
+            rowId,
             exerciseId,
             sets: asString(rowRec.sets) || null,
             reps: asString(rowRec.reps) || null,
@@ -224,11 +227,11 @@ function serializeRunNotes(value: {
 }
 
 function Field({ label, value, className = "" }: { label: string; value?: string | number | null; className?: string }) {
-  const display = value == null || value === "" ? "-" : String(value);
+  const display = value == null || value === "" ? "—" : String(value);
   return (
-    <div className={`flex flex-col gap-1 ${className}`}>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-sm font-medium">{display}</div>
+    <div className={`min-w-0 ${className}`}>
+      <div className="text-xs opacity-70">{label}</div>
+      <div className="text-sm font-medium break-words">{display}</div>
     </div>
   );
 }
@@ -1081,70 +1084,86 @@ export default function AssignedSessionDetailPage() {
               <div>{detail?.notesPrivate || "-"}</div>
             </div>
 
-            {(detail?.blocks ?? []).map((block, blockIndex) => (
-              <div
-                key={`block-read-${blockIndex}`}
-                style={{
-                  padding: 12,
-                  borderRadius: 12,
-                  border: "1px solid #ddd",
-                  display: "grid",
-                  gap: 10,
-                }}
-              >
-                <strong>
-                  Blocco {blockIndex + 1}: {block.name}
-                </strong>
-                <ul className="space-y-3">
-                  {block.rows.map((row, rowIndex) => {
-                    const ex = exercisesById[row.exerciseId];
-                    const runNotes = parseRunNotes(row.notesPublic ?? null);
-                    return (
-                      <li className="rounded-xl border p-3">
-                        <div className="font-semibold">
-                          {rowIndex + 1}. {ex?.name || row.exerciseId}
+            <div className="space-y-6">
+              {(detail?.blocks ?? []).map((block, blockIndex) => (
+                <div
+                  key={`block-read-${blockIndex}`}
+                  style={{
+                    padding: 12,
+                    borderRadius: 12,
+                    border: "1px solid #ddd",
+                    display: "grid",
+                    gap: 10,
+                  }}
+                >
+                  <strong>
+                    Blocco {blockIndex + 1}: {block.name}
+                  </strong>
+                  <div className="mt-3 space-y-3">
+                    {block.rows.map((row, rowIndex) => {
+                      const ex = exercisesById[row.exerciseId];
+                      const runNotes = parseRunNotes(row.notesPublic ?? null);
+                      const metrics = runNotes
+                        ? [
+                            { key: "durata", label: "Durata", value: runNotes.duration },
+                            { key: "distanza", label: "Distanza", value: runNotes.distance },
+                            { key: "passo", label: "Passo", value: runNotes.pace },
+                            { key: "zona-fc", label: "Zona FC", value: runNotes.hr },
+                            { key: "rpe", label: "RPE", value: runNotes.rpe },
+                            {
+                              key: "note",
+                              label: "Note",
+                              value: runNotes.note,
+                              className: "col-span-2 sm:col-span-3 md:col-span-6",
+                            },
+                            {
+                              key: "nota-coach",
+                              label: "Nota coach",
+                              value: row.notesPrivate,
+                              className: "col-span-2 sm:col-span-3 md:col-span-6",
+                            },
+                          ]
+                        : [
+                            { key: "set", label: "Set", value: row.sets },
+                            { key: "reps", label: "Reps", value: row.reps },
+                            { key: "rest", label: "Rest", value: row.rest },
+                            { key: "percent", label: "%", value: row.percent },
+                            { key: "kg", label: "Kg", value: row.kg },
+                            {
+                              key: "note-pubbliche",
+                              label: "Note pubbliche",
+                              value: row.notesPublic,
+                              className: "col-span-2 sm:col-span-3 md:col-span-6",
+                            },
+                            {
+                              key: "nota-coach",
+                              label: "Nota coach",
+                              value: row.notesPrivate,
+                              className: "col-span-2 sm:col-span-3 md:col-span-6",
+                            },
+                          ];
+                      return (
+                        <div key={row.rowId} className="rounded-xl border p-3">
+                          <div className="font-semibold">
+                            {rowIndex + 1}. {ex?.name || row.exerciseId}
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+                            {metrics.map((metric) => (
+                              <Field
+                                key={metric.key}
+                                label={metric.label}
+                                value={metric.value}
+                                className={metric.className ?? ""}
+                              />
+                            ))}
+                          </div>
                         </div>
-                        <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-3">
-                          {runNotes ? (
-                            <>
-                              <Field label="Durata" value={runNotes.duration} />
-                              <Field label="Distanza" value={runNotes.distance} />
-                              <Field label="Passo" value={runNotes.pace} />
-                              <Field label="Zona FC" value={runNotes.hr} />
-                              <Field label="RPE" value={runNotes.rpe} />
-                              <Field label="Note" value={runNotes.note} className="md:col-span-4" />
-                              <Field
-                                label="Nota coach"
-                                value={row.notesPrivate}
-                                className="md:col-span-4"
-                              />
-                            </>
-                          ) : (
-                            <>
-                              <Field label="Set" value={row.sets} />
-                              <Field label="Reps" value={row.reps} />
-                              <Field label="Rest" value={row.rest} />
-                              <Field label="%" value={row.percent} />
-                              <Field label="Kg" value={row.kg} />
-                              <Field
-                                label="Note pubbliche"
-                                value={row.notesPublic}
-                                className="md:col-span-4"
-                              />
-                              <Field
-                                label="Nota coach"
-                                value={row.notesPrivate}
-                                className="md:col-span-4"
-                              />
-                            </>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))}
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
