@@ -223,6 +223,16 @@ function serializeRunNotes(value: {
   return parts.join("|");
 }
 
+function Field({ label, value, className = "" }: { label: string; value?: string | number | null; className?: string }) {
+  const display = value == null || value === "" ? "-" : String(value);
+  return (
+    <div className={`min-w-0 ${className}`}>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="text-sm font-medium break-words">{display}</div>
+    </div>
+  );
+}
+
 function formFromDetail(detail: SessionDetail): SessionForm {
   return {
     title: detail.title,
@@ -1089,39 +1099,49 @@ export default function AssignedSessionDetailPage() {
                   const ex = exercisesById[row.exerciseId];
                   const runNotes = parseRunNotes(row.notesPublic ?? null);
                   return (
-                    <div
-                      key={`row-read-${blockIndex}-${rowIndex}`}
-                      style={{
-                        padding: 10,
-                        borderRadius: 10,
-                        border: "1px solid #eee",
-                        display: "grid",
-                        gap: 6,
-                      }}
-                    >
-                      <strong>
+                    <div className="rounded-lg border p-3">
+                      <div className="font-semibold">
                         {rowIndex + 1}. {ex?.name || row.exerciseId}
-                      </strong>
-                      {runNotes ? (
-                        <div style={{ display: "grid", gap: 4 }}>
-                          <div>Durata: {runNotes.duration || "-"}</div>
-                          <div>Distanza: {runNotes.distance || "-"}</div>
-                          <div>Passo: {runNotes.pace || "-"}</div>
-                          <div>Zona FC: {runNotes.hr || "-"}</div>
-                          <div>RPE: {runNotes.rpe || "-"}</div>
-                          <div>Note: {runNotes.note || "-"}</div>
-                        </div>
-                      ) : (
-                        <div style={{ display: "grid", gap: 4 }}>
-                          <div>Set: {row.sets || "-"}</div>
-                          <div>Reps: {row.reps || "-"}</div>
-                          <div>Rest: {row.rest || "-"}</div>
-                          <div>%: {row.percent || "-"}</div>
-                          <div>Kg: {row.kg || "-"}</div>
-                          <div>Note pubbliche: {row.notesPublic || "-"}</div>
-                        </div>
-                      )}
-                      <div>Nota coach: {row.notesPrivate || "-"}</div>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                        {runNotes ? (
+                          <>
+                            <Field label="Durata" value={runNotes.duration} />
+                            <Field label="Distanza" value={runNotes.distance} />
+                            <Field label="Passo" value={runNotes.pace} />
+                            <Field label="Zona FC" value={runNotes.hr} />
+                            <Field label="RPE" value={runNotes.rpe} />
+                            <Field
+                              label="Note"
+                              value={runNotes.note}
+                              className="col-span-2 sm:col-span-3 lg:col-span-6"
+                            />
+                            <Field
+                              label="Nota coach"
+                              value={row.notesPrivate}
+                              className="col-span-2 sm:col-span-3 lg:col-span-6"
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <Field label="Set" value={row.sets} />
+                            <Field label="Reps" value={row.reps} />
+                            <Field label="Rest" value={row.rest} />
+                            <Field label="%" value={row.percent} />
+                            <Field label="Kg" value={row.kg} />
+                            <Field
+                              label="Note pubbliche"
+                              value={row.notesPublic}
+                              className="col-span-2 sm:col-span-3 lg:col-span-6"
+                            />
+                            <Field
+                              label="Nota coach"
+                              value={row.notesPrivate}
+                              className="col-span-2 sm:col-span-3 lg:col-span-6"
+                            />
+                          </>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
