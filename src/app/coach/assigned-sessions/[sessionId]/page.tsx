@@ -521,6 +521,49 @@ export default function AssignedSessionDetailPage() {
     return map;
   }, [exercises]);
 
+  const groupedExercises = useMemo(() => {
+    const buckets: Record<string, ExerciseRow[]> = {
+      WL: [],
+      Strength: [],
+      Accessory: [],
+      Mobility: [],
+      Conditioning: [],
+      Other: [],
+    };
+    exercises.forEach((ex) => {
+      switch (ex.category) {
+        case "WEIGHTLIFTING":
+          buckets.WL.push(ex);
+          break;
+        case "GYM":
+          buckets.Strength.push(ex);
+          break;
+        case "METCON":
+        case "RUN":
+        case "ERG":
+          buckets.Conditioning.push(ex);
+          break;
+        default:
+          buckets.Other.push(ex);
+          break;
+      }
+    });
+    const order = [
+      { key: "WL", label: "WL" },
+      { key: "Strength", label: "Strength" },
+      { key: "Accessory", label: "Accessory" },
+      { key: "Mobility", label: "Mobility" },
+      { key: "Conditioning", label: "Conditioning" },
+      { key: "Other", label: "Other" },
+    ];
+    return order
+      .map((group) => ({
+        label: group.label,
+        items: buckets[group.key].slice().sort((a, b) => a.name.localeCompare(b.name)),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [exercises]);
+
   const currentUrl = useMemo(() => {
     const qs = searchParams.toString();
     return qs ? `${pathname}?${qs}` : pathname;
@@ -805,11 +848,11 @@ export default function AssignedSessionDetailPage() {
               flexWrap: "wrap",
             }}
           >
-            <button type="button" onClick={handleSave} disabled={saving || loading}>
-              {saving ? "Salvo..." : isNew ? "Crea sessione" : "Salva"}
-            </button>
             <button type="button" onClick={handleCancelEdit} disabled={saving || loading}>
               Annulla
+            </button>
+            <button type="button" onClick={handleSave} disabled={saving || loading}>
+              {saving ? "Salvo..." : isNew ? "Crea sessione" : "Salva sessione"}
             </button>
             <button type="button" onClick={addBlock} disabled={saving || loading}>
               + Blocco
@@ -927,6 +970,36 @@ export default function AssignedSessionDetailPage() {
                             Rimuovi
                           </button>
                         </div>
+
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>Seleziona esercizio</span>
+                          <select
+                            value={row.exerciseId}
+                            onChange={(e) => {
+                              const nextId = e.target.value;
+                              const nextExercise = exercisesById[nextId];
+                              updateRow(blockIndex, rowIndex, {
+                                exerciseId: nextId,
+                                exerciseSearch: nextExercise?.name ?? "",
+                              });
+                              const key = getRowKey(blockIndex, rowIndex);
+                              setSearchResults((prev) => ({ ...prev, [key]: [] }));
+                              setSearchLoadingByKey((prev) => ({ ...prev, [key]: false }));
+                              setSearchErrorByKey((prev) => ({ ...prev, [key]: "" }));
+                            }}
+                          >
+                            <option value="">Seleziona...</option>
+                            {groupedExercises.map((group) => (
+                              <optgroup key={group.label} label={group.label}>
+                                {group.items.map((ex) => (
+                                  <option key={ex.exerciseId} value={ex.exerciseId}>
+                                    {ex.name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </select>
+                        </label>
 
                         <label style={{ display: "grid", gap: 6 }}>
                           <span>Cerca esercizio</span>
@@ -1352,6 +1425,32 @@ export default function AssignedSessionDetailPage() {
             </div>
           </div>
         )}
+
+        {isEditMode ? (
+          <div
+            style={{
+              position: "sticky",
+              bottom: 0,
+              zIndex: 2,
+              background: "#fff",
+              padding: "8px 0",
+              borderTop: "1px solid #eee",
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <button type="button" onClick={handleCancelEdit} disabled={saving || loading}>
+              Annulla
+            </button>
+            <button type="button" onClick={handleSave} disabled={saving || loading}>
+              {saving ? "Salvo..." : isNew ? "Crea sessione" : "Salva sessione"}
+            </button>
+            <button type="button" onClick={addBlock} disabled={saving || loading}>
+              + Blocco
+            </button>
+          </div>
+        ) : null}
 
         {saveError ? <p>Errore: {saveError}</p> : null}
       </section>

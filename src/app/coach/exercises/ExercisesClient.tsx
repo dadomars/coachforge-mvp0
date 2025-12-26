@@ -522,6 +522,17 @@ export default function CoachExercisesPage() {
                   type="button"
                   disabled={newFormBusy}
                   onClick={() => {
+                    if (isPopup) {
+                      window.close();
+                      setTimeout(() => {
+                        if (!window.closed) {
+                          setPopupNotice(
+                            "Operazione annullata. Puoi chiudere questa finestra."
+                          );
+                        }
+                      }, 200);
+                      return;
+                    }
                     setShowNewForm(false);
                     setNewFormErr("");
                     setNewForm(createEmptyForm());

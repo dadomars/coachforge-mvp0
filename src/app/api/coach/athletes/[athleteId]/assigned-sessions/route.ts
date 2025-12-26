@@ -62,16 +62,9 @@ export async function GET(
     orderBy: { date: "desc" },
     select: {
       assignedSessionId: true,
-      coachId: true,
-      athleteId: true,
-      templateId: true,
       date: true,
       title: true,
-      notesPublic: true,
-      notesPrivate: true,
       status: true,
-      createdAt: true,
-      updatedAt: true,
     },
   });
 

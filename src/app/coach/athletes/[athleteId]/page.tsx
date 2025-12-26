@@ -87,6 +87,13 @@ type EventAssignmentRow = {
   assignedAt: string;
 };
 
+type AssignedSessionRow = {
+  assignedSessionId: string;
+  date: string | null;
+  title: string;
+  status: string;
+};
+
 function normalizeCompetition(value: unknown): CompetitionLibraryRow | null {
   if (!value || typeof value !== 'object') return null;
   const rec = value as Record<string, unknown>;
@@ -167,6 +174,21 @@ function normalizeEventAssignment(value: unknown): EventAssignmentRow | null {
   if (!assignmentId || !eventId || !assignedAt) return null;
   return { assignmentId, eventId, assignedAt };
 }
+
+function normalizeAssignedSession(value: unknown): AssignedSessionRow | null {
+  if (!value || typeof value !== 'object') return null;
+  const rec = value as Record<string, unknown>;
+  const assignedSessionId = asString(rec['assignedSessionId']);
+  const title = asString(rec['title']);
+  const status = asString(rec['status']);
+  if (!assignedSessionId || !title || !status) return null;
+  return {
+    assignedSessionId,
+    date: asString(rec['date']) || null,
+    title,
+    status,
+  };
+}
 export default function AthleteDetailPage() {
   const params = useParams<{ athleteId: string | string[] }>();
   const athleteId = Array.isArray(params.athleteId)
@@ -204,6 +226,10 @@ export default function AthleteDetailPage() {
   const [eventAssignErr, setEventAssignErr] = useState<string>('');
   const [eventAssignBusy, setEventAssignBusy] = useState(false);
   const [eventRowBusyId, setEventRowBusyId] = useState<string | null>(null);
+
+  const [assignedSessions, setAssignedSessions] = useState<AssignedSessionRow[]>([]);
+  const [assignedSessionsLoading, setAssignedSessionsLoading] = useState(false);
+  const [assignedSessionsErr, setAssignedSessionsErr] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -302,6 +328,45 @@ export default function AthleteDetailPage() {
     }
 
     loadAssignments();
+
+    return () => {
+      alive = false;
+    };
+  }, [athleteId]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadAssignedSessions() {
+      if (!athleteId) return;
+      setAssignedSessionsLoading(true);
+      setAssignedSessionsErr('');
+      try {
+        const r = await fetch(
+          `/api/coach/athletes/${athleteId}/assigned-sessions`,
+          { cache: 'no-store' }
+        );
+        const data = await r.json().catch(() => null);
+        if (!r.ok) {
+          const msg =
+            (data && (data.error || data.message)) ||
+            `Errore caricamento sessioni (${r.status})`;
+          throw new Error(msg);
+        }
+        if (!Array.isArray(data))
+          throw new Error('Risposta sessioni assegnate non valida.');
+        const normalized = data
+          .map((row: unknown) => normalizeAssignedSession(row))
+          .filter(Boolean) as AssignedSessionRow[];
+        if (alive) setAssignedSessions(normalized);
+      } catch (e: unknown) {
+        if (alive) setAssignedSessionsErr(errorMessage(e));
+      } finally {
+        if (alive) setAssignedSessionsLoading(false);
+      }
+    }
+
+    loadAssignedSessions();
 
     return () => {
       alive = false;
@@ -663,6 +728,62 @@ export default function AthleteDetailPage() {
             Atleta non trovato (ID: <code>{athleteId}</code>)
           </p>
         )}
+      </section>
+
+      <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 10 }}>
+        <h2 style={{ margin: 0 }}>Programmazione assegnata</h2>
+        {assignedSessionsLoading ? (
+          <p style={{ marginTop: 8 }}>Caricamento sessioni...</p>
+        ) : assignedSessionsErr ? (
+          <p style={{ marginTop: 8 }}>Errore: {assignedSessionsErr}</p>
+        ) : assignedSessions.length === 0 ? (
+          <p style={{ marginTop: 8 }}>Nessuna sessione assegnata.</p>
+        ) : null}
+
+        <div style={{ marginTop: 12, overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                  Data
+                </th>
+                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                  Titolo
+                </th>
+                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                  Stato
+                </th>
+                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                  Azioni
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {assignedSessions.map((session) => {
+                const dateLabel = toDateInputValue(session.date);
+                return (
+                  <tr key={session.assignedSessionId}>
+                    <td style={{ padding: '6px 4px' }}>{dateLabel || '-'}</td>
+                    <td style={{ padding: '6px 4px' }}>
+                      {titleCaseIt(session.title)}
+                    </td>
+                    <td style={{ padding: '6px 4px' }}>
+                      {formatStatusItUpper(session.status)}
+                    </td>
+                    <td style={{ padding: '6px 4px' }}>
+                      <Link
+                        href={`/coach/assigned-sessions/${session.assignedSessionId}`}
+                        style={{ textDecoration: 'underline' }}
+                      >
+                        Apri
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 10 }}>
