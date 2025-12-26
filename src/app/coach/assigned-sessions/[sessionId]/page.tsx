@@ -23,6 +23,7 @@ type SessionRow = {
 };
 
 type SessionBlock = {
+  blockId: string;
   name: string;
   rows: SessionRow[];
 };
@@ -99,6 +100,7 @@ function normalizeSessionDetail(value: unknown): SessionDetail | null {
     .map((block) => {
       if (!block || typeof block !== "object") return null;
       const blockRec = block as Record<string, unknown>;
+      const blockId = asString(blockRec.blockId);
       const name = asString(blockRec.name);
       const rowsInput = Array.isArray(blockRec.rows) ? blockRec.rows : [];
       const rows: SessionRow[] = rowsInput
@@ -121,8 +123,8 @@ function normalizeSessionDetail(value: unknown): SessionDetail | null {
           };
         })
         .filter(Boolean) as SessionRow[];
-      if (!name) return null;
-      return { name, rows };
+      if (!blockId || !name) return null;
+      return { blockId, name, rows };
     })
     .filter(Boolean) as SessionBlock[];
 
@@ -224,16 +226,6 @@ function serializeRunNotes(value: {
   const parts = [`RUN`, `dur=${dur}`, `dist=${dist}`, `pace=${pace}`, `hr=${hr}`, `rpe=${rpe}`];
   if (note) parts.push(`note=${note}`);
   return parts.join("|");
-}
-
-function Field({ label, value, className = "" }: { label: string; value?: string | number | null; className?: string }) {
-  const display = value == null || value === "" ? "—" : String(value);
-  return (
-    <div className={`min-w-0 ${className}`}>
-      <div className="text-xs opacity-70">{label}</div>
-      <div className="text-sm font-medium break-words">{display}</div>
-    </div>
-  );
 }
 
 function formFromDetail(detail: SessionDetail): SessionForm {
@@ -375,6 +367,9 @@ export default function AssignedSessionDetailPage() {
 
   const [form, setForm] = useState<SessionForm>(createEmptyForm);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const draftInitRef = useRef(false);
+  const didRestoreRef = useRef(false);
 
   const [exercises, setExercises] = useState<ExerciseRow[]>([]);
   const [searchResults, setSearchResults] = useState<Record<string, ExerciseRow[]>>({});
@@ -430,12 +425,87 @@ export default function AssignedSessionDetailPage() {
 
   useEffect(() => {
     if (isNew) {
+      const hasDraft = !!searchParams.get("draft");
       setDetail(null);
-      setForm(createEmptyForm());
+      if (!hasDraft && !didRestoreRef.current) {
+        setForm(createEmptyForm());
+      }
       return;
     }
     loadDetail();
-  }, [sessionId, isNew]);
+  }, [isNew, searchParams, sessionId]);
+
+  useEffect(() => {
+    if (!isNew) return;
+    const existing = searchParams.get("draft");
+    if (existing) {
+      setDraftId(existing);
+      return;
+    }
+    const nextId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `draft-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const qs = new URLSearchParams(searchParams.toString());
+    qs.set("draft", nextId);
+    router.replace(`${pathname}?${qs.toString()}`);
+    setDraftId(nextId);
+  }, [isNew, pathname, router, searchParams]);
+
+  const draftKey = useMemo(() => {
+    return draftId ? `session-draft:${draftId}` : null;
+  }, [draftId]);
+
+  function saveDraftNow(nextForm: SessionForm) {
+    if (!draftKey) return;
+    try {
+      sessionStorage.setItem(
+        draftKey,
+        JSON.stringify({
+          version: 1,
+          savedAt: new Date().toISOString(),
+          form: nextForm,
+          blocks: nextForm.blocks,
+        })
+      );
+    } catch {
+      // ignore draft save errors
+    }
+  }
+
+  useEffect(() => {
+    if (!isNew || !draftKey || draftInitRef.current) return;
+    draftInitRef.current = true;
+    try {
+      const raw = sessionStorage.getItem(draftKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        form?: SessionForm;
+        blocks?: SessionBlockForm[];
+      };
+      if (parsed && typeof parsed === "object") {
+        if (parsed.form && Array.isArray(parsed.form.blocks)) {
+          setForm(parsed.form);
+          didRestoreRef.current = true;
+          return;
+        }
+        if (Array.isArray(parsed.blocks)) {
+          setForm((prev) => ({ ...prev, blocks: parsed.blocks as SessionBlockForm[] }));
+          didRestoreRef.current = true;
+        }
+      }
+    } catch {
+      // ignore draft load errors
+    }
+  }, [draftKey, isNew]);
+
+  useEffect(() => {
+    if (!isNew || !draftKey) return;
+    const handle = setTimeout(() => {
+      saveDraftNow(form);
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [draftKey, form, isNew]);
 
   useEffect(() => {
     return () => {
@@ -456,8 +526,33 @@ export default function AssignedSessionDetailPage() {
     return qs ? `${pathname}?${qs}` : pathname;
   }, [pathname, searchParams]);
 
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as { type?: string };
+      if (!data || data.type !== "CF_EXERCISE_CREATED") return;
+      loadExercises();
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
   function handleEnterEdit() {
     router.replace(`${pathname}?mode=edit`);
+  }
+
+  function handleOpenExercises(url: string) {
+    saveDraftNow(form);
+    const popupUrl = `${url}${url.includes("?") ? "&" : "?"}popup=1`;
+    const popup = window.open(
+      popupUrl,
+      "cf_exercises_popup",
+      "popup=yes,width=1100,height=800,left=200,top=100"
+    );
+    if (!popup) {
+      window.open(popupUrl, "_blank", "noopener,noreferrer");
+      alert("Popup bloccato: aperto in nuova scheda. Torna qui senza refresh.");
+    }
   }
 
   function handleCancelEdit() {
@@ -465,6 +560,13 @@ export default function AssignedSessionDetailPage() {
     setRowErrors({});
     setBlockErrors({});
     if (isNew) {
+      if (draftKey) {
+        try {
+          sessionStorage.removeItem(draftKey);
+        } catch {
+          // ignore
+        }
+      }
       router.replace("/coach/assigned-sessions");
       return;
     }
@@ -539,6 +641,15 @@ export default function AssignedSessionDetailPage() {
       ...prev,
       blocks: [...prev.blocks, createEmptyBlock()],
     }));
+  }
+
+  function addBlockAfter(blockIndex: number) {
+    setForm((prev) => {
+      const blocks = [...prev.blocks];
+      const insertAt = Math.min(blockIndex + 1, blocks.length);
+      blocks.splice(insertAt, 0, createEmptyBlock());
+      return { ...prev, blocks };
+    });
   }
 
   function removeBlock(blockIndex: number) {
@@ -641,6 +752,13 @@ export default function AssignedSessionDetailPage() {
           `Errore salvataggio sessione (${r.status})`;
         throw new Error(msg);
       }
+      if (draftKey) {
+        try {
+          sessionStorage.removeItem(draftKey);
+        } catch {
+          // ignore
+        }
+      }
       router.replace("/coach/assigned-sessions");
       return;
     } catch (e) {
@@ -695,19 +813,6 @@ export default function AssignedSessionDetailPage() {
             </button>
             <button type="button" onClick={addBlock} disabled={saving || loading}>
               + Blocco
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (form.blocks.length === 0) {
-                  addBlock();
-                  return;
-                }
-                addRow(form.blocks.length - 1);
-              }}
-              disabled={saving || loading}
-            >
-              + Esercizio
             </button>
           </div>
         ) : null}
@@ -796,9 +901,12 @@ export default function AssignedSessionDetailPage() {
                       !selected;
                     const rowError = rowErrors[rowKey];
                     const isRun = selected?.category === "RUN";
+                    const returnTo = isNew && draftId
+                      ? `/coach/assigned-sessions/new?draft=${draftId}`
+                      : currentUrl;
                     const newExerciseUrl = `/coach/exercises?name=${encodeURIComponent(
                       row.exerciseSearch.trim()
-                    )}&returnTo=${encodeURIComponent(currentUrl)}`;
+                    )}&returnTo=${encodeURIComponent(returnTo)}`;
                     return (
                       <div
                         key={`row-${blockIndex}-${rowIndex}`}
@@ -888,7 +996,14 @@ export default function AssignedSessionDetailPage() {
                         </div>
 
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <Link href={newExerciseUrl} style={{ textDecoration: "underline" }}>
+                          <Link
+                            href={newExerciseUrl}
+                            style={{ textDecoration: "underline" }}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleOpenExercises(newExerciseUrl);
+                            }}
+                          >
                             + Nuovo esercizio
                           </Link>
                         </div>
@@ -1058,9 +1173,14 @@ export default function AssignedSessionDetailPage() {
                     );
                   })}
 
-                  <button type="button" onClick={() => addRow(blockIndex)}>
-                    Aggiungi esercizio
-                  </button>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button type="button" onClick={() => addRow(blockIndex)}>
+                      + Esercizio
+                    </button>
+                    <button type="button" onClick={() => addBlockAfter(blockIndex)}>
+                      + Blocco sotto
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -1069,100 +1189,166 @@ export default function AssignedSessionDetailPage() {
           <div style={{ display: "grid", gap: 12 }}>
             <div style={{ display: "grid", gap: 6 }}>
               <strong>Titolo</strong>
-              <div>{detail?.title || form.title || "-"}</div>
+              <div>{detail?.title || form.title || "—"}</div>
             </div>
             <div style={{ display: "grid", gap: 6 }}>
               <strong>Data sessione</strong>
-              <div>{formatDate(detail?.sessionDate ?? form.sessionDate) || "-"}</div>
+              <div>{formatDate(detail?.sessionDate ?? form.sessionDate) || "—"}</div>
             </div>
             <div style={{ display: "grid", gap: 6 }}>
               <strong>Note pubbliche</strong>
-              <div>{detail?.notesPublic || "-"}</div>
+              <div>{detail?.notesPublic || "—"}</div>
             </div>
             <div style={{ display: "grid", gap: 6 }}>
               <strong>Note private</strong>
-              <div>{detail?.notesPrivate || "-"}</div>
+              <div>{detail?.notesPrivate || "—"}</div>
             </div>
 
             <div className="space-y-6">
-              {(detail?.blocks ?? []).map((block, blockIndex) => (
-                <div
-                  key={`block-read-${blockIndex}`}
-                  style={{
-                    padding: 12,
-                    borderRadius: 12,
-                    border: "1px solid #ddd",
-                    display: "grid",
-                    gap: 10,
-                  }}
-                >
-                  <strong>
-                    Blocco {blockIndex + 1}: {block.name}
-                  </strong>
-                  <div className="mt-3 space-y-3">
-                    {block.rows.map((row, rowIndex) => {
-                      const ex = exercisesById[row.exerciseId];
-                      const runNotes = parseRunNotes(row.notesPublic ?? null);
-                      const metrics = runNotes
-                        ? [
-                            { key: "durata", label: "Durata", value: runNotes.duration },
-                            { key: "distanza", label: "Distanza", value: runNotes.distance },
-                            { key: "passo", label: "Passo", value: runNotes.pace },
-                            { key: "zona-fc", label: "Zona FC", value: runNotes.hr },
-                            { key: "rpe", label: "RPE", value: runNotes.rpe },
-                            {
-                              key: "note",
-                              label: "Note",
-                              value: runNotes.note,
-                              className: "col-span-2 sm:col-span-3 md:col-span-6",
-                            },
-                            {
-                              key: "nota-coach",
-                              label: "Nota coach",
-                              value: row.notesPrivate,
-                              className: "col-span-2 sm:col-span-3 md:col-span-6",
-                            },
-                          ]
-                        : [
-                            { key: "set", label: "Set", value: row.sets },
-                            { key: "reps", label: "Reps", value: row.reps },
-                            { key: "rest", label: "Rest", value: row.rest },
-                            { key: "percent", label: "%", value: row.percent },
-                            { key: "kg", label: "Kg", value: row.kg },
-                            {
-                              key: "note-pubbliche",
-                              label: "Note pubbliche",
-                              value: row.notesPublic,
-                              className: "col-span-2 sm:col-span-3 md:col-span-6",
-                            },
-                            {
-                              key: "nota-coach",
-                              label: "Nota coach",
-                              value: row.notesPrivate,
-                              className: "col-span-2 sm:col-span-3 md:col-span-6",
-                            },
-                          ];
-                      return (
-                        <div key={row.rowId} className="rounded-xl border p-3">
-                          <div className="font-semibold">
-                            {rowIndex + 1}. {ex?.name || row.exerciseId}
-                          </div>
-                          <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-                            {metrics.map((metric) => (
-                              <Field
-                                key={metric.key}
-                                label={metric.label}
-                                value={metric.value}
-                                className={metric.className ?? ""}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
+              {(detail?.blocks ?? []).map((block, blockIndex) => {
+                const renderBlockTable = (rows: typeof block.rows) => (
+                  <div className="overflow-x-auto -mx-2 px-2">
+                    <table className="min-w-[1300px] w-full border-collapse table-fixed text-sm leading-6">
+                      <colgroup>
+                        <col style={{ width: "220px" }} />
+                        <col style={{ width: "80px" }} />
+                        <col style={{ width: "90px" }} />
+                        <col style={{ width: "110px" }} />
+                        <col style={{ width: "110px" }} />
+                        <col style={{ width: "110px" }} />
+                        <col style={{ width: "80px" }} />
+                        <col style={{ width: "80px" }} />
+                        <col style={{ width: "80px" }} />
+                        <col style={{ width: "110px" }} />
+                        <col style={{ width: "70px" }} />
+                        <col style={{ width: "90px" }} />
+                        <col style={{ width: "220px" }} />
+                        <col style={{ width: "220px" }} />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            Esercizio
+                          </th>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            Tipo
+                          </th>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            Durata
+                          </th>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            Distanza
+                          </th>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            Passo
+                          </th>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            Zona FC
+                          </th>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            RPE
+                          </th>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            Set
+                          </th>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            Reps
+                          </th>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            Rest
+                          </th>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            %
+                          </th>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            Kg
+                          </th>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            Note
+                          </th>
+                          <th className="border border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold whitespace-nowrap">
+                            Nota coach
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((row, rowIndex) => {
+                          const ex = exercisesById[row.exerciseId];
+                          const runNotes = parseRunNotes(row.notesPublic ?? null);
+                          const isRun = !!runNotes;
+                          return (
+                            <tr key={row.rowId} className="even:bg-slate-50/50">
+                              <td className="border border-slate-300 px-3 py-2 align-top">
+                                {rowIndex + 1}. {ex?.name || row.exerciseId}
+                              </td>
+                              <td className="border border-slate-300 px-3 py-2 align-top text-center whitespace-nowrap">
+                                {isRun ? "RUN" : "FORZA"}
+                              </td>
+                              <td className="border border-slate-300 px-3 py-2 align-top text-center whitespace-nowrap">
+                                {runNotes?.duration || "—"}
+                              </td>
+                              <td className="border border-slate-300 px-3 py-2 align-top text-center whitespace-nowrap">
+                                {runNotes?.distance || "—"}
+                              </td>
+                              <td className="border border-slate-300 px-3 py-2 align-top text-center whitespace-nowrap">
+                                {runNotes?.pace || "—"}
+                              </td>
+                              <td className="border border-slate-300 px-3 py-2 align-top text-center whitespace-nowrap">
+                                {runNotes?.hr || "—"}
+                              </td>
+                              <td className="border border-slate-300 px-3 py-2 align-top text-center whitespace-nowrap">
+                                {runNotes?.rpe || "—"}
+                              </td>
+                              <td className="border border-slate-300 px-3 py-2 align-top text-center whitespace-nowrap">
+                                {row.sets || "—"}
+                              </td>
+                              <td className="border border-slate-300 px-3 py-2 align-top text-center whitespace-nowrap">
+                                {row.reps || "—"}
+                              </td>
+                              <td className="border border-slate-300 px-3 py-2 align-top text-center whitespace-nowrap">
+                                {row.rest || "—"}
+                              </td>
+                              <td className="border border-slate-300 px-3 py-2 align-top text-center whitespace-nowrap">
+                                {row.percent || "—"}
+                              </td>
+                              <td className="border border-slate-300 px-3 py-2 align-top text-center whitespace-nowrap">
+                                {row.kg || "—"}
+                              </td>
+                              <td className="border border-slate-300 px-3 py-2 align-top whitespace-pre-wrap break-words">
+                                {(runNotes?.note || row.notesPublic) || "—"}
+                              </td>
+                              <td className="border border-slate-300 px-3 py-2 align-top whitespace-pre-wrap break-words">
+                                {row.notesPrivate || "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                </div>
-              ))}
+                );
+
+
+                return (
+                  <div
+                    key={block.blockId}
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid #ddd",
+                      display: "grid",
+                      gap: 10,
+                    }}
+                  >
+                    <strong>
+                      Blocco {blockIndex + 1}: {block.name}
+                    </strong>
+                    <div className="space-y-4">
+                      {renderBlockTable(block.rows)}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
