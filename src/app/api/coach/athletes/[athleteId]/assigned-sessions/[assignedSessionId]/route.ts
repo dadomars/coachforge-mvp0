@@ -57,6 +57,13 @@ export async function GET(
             select: {
               rowId: true,
               exerciseId: true,
+              exercise: {
+                select: {
+                  exerciseId: true,
+                  name: true,
+                  category: true,
+                },
+              },
               sortOrder: true,
               sets: true,
               reps: true,
