@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { Fragment, useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   formatStatusItUpper,
@@ -19,6 +19,19 @@ function asBool(v: unknown): boolean {
 
 function toDateInputValue(v: string | null | undefined): string {
   return typeof v === 'string' && v.length >= 10 ? v.slice(0, 10) : '';
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function toLocalDateKey(value: string | null | undefined): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(
+    date.getDate()
+  )}`;
 }
 
 function errorMessage(e: unknown): string {
@@ -88,10 +101,13 @@ type EventAssignmentRow = {
 };
 
 type AssignedSessionRow = {
-  assignedSessionId: string;
-  date: string | null;
+  assignmentId: string;
+  sessionId: string;
+  assignedAt: string;
+  sessionDate: string | null;
   title: string;
-  status: string;
+  notesPublic: string;
+  createdAt?: string;
 };
 
 function normalizeCompetition(value: unknown): CompetitionLibraryRow | null {
@@ -178,19 +194,24 @@ function normalizeEventAssignment(value: unknown): EventAssignmentRow | null {
 function normalizeAssignedSession(value: unknown): AssignedSessionRow | null {
   if (!value || typeof value !== 'object') return null;
   const rec = value as Record<string, unknown>;
-  const assignedSessionId = asString(rec['assignedSessionId']);
+  const assignmentId = asString(rec['assignmentId']);
+  const sessionId = asString(rec['sessionId']);
+  const assignedAt = asString(rec['assignedAt']);
   const title = asString(rec['title']);
-  const status = asString(rec['status']);
-  if (!assignedSessionId || !title || !status) return null;
+  if (!assignmentId || !sessionId || !assignedAt || !title) return null;
   return {
-    assignedSessionId,
-    date: asString(rec['date']) || null,
+    assignmentId,
+    sessionId,
+    assignedAt,
+    sessionDate: asString(rec['sessionDate']) || null,
     title,
-    status,
+    notesPublic: asString(rec['notesPublic']),
+    createdAt: asString(rec['createdAt']) || undefined,
   };
 }
 export default function AthleteDetailPage() {
   const params = useParams<{ athleteId: string | string[] }>();
+  const router = useRouter();
   const athleteId = Array.isArray(params.athleteId)
     ? params.athleteId[0]
     : params.athleteId;
@@ -222,14 +243,20 @@ export default function AthleteDetailPage() {
   const [eventAssignments, setEventAssignments] = useState<EventAssignmentRow[]>([]);
   const [eventAssignmentsLoading, setEventAssignmentsLoading] = useState(false);
   const [eventAssignmentsErr, setEventAssignmentsErr] = useState<string>('');
-  const [eventAssignId, setEventAssignId] = useState('');
   const [eventAssignErr, setEventAssignErr] = useState<string>('');
   const [eventAssignBusy, setEventAssignBusy] = useState(false);
   const [eventRowBusyId, setEventRowBusyId] = useState<string | null>(null);
+  const [showEventAssignForm, setShowEventAssignForm] = useState(false);
+  const [assignEventId, setAssignEventId] = useState('');
 
   const [assignedSessions, setAssignedSessions] = useState<AssignedSessionRow[]>([]);
   const [assignedSessionsLoading, setAssignedSessionsLoading] = useState(false);
   const [assignedSessionsErr, setAssignedSessionsErr] = useState('');
+  const [sessionFilter, setSessionFilter] = useState<
+    'today' | 'week' | 'range' | 'all'
+  >('today');
+  const [sessionDateFrom, setSessionDateFrom] = useState('');
+  const [sessionDateTo, setSessionDateTo] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -343,18 +370,18 @@ export default function AthleteDetailPage() {
       setAssignedSessionsErr('');
       try {
         const r = await fetch(
-          `/api/coach/athletes/${athleteId}/assigned-sessions`,
+          `/api/coach/athletes/${athleteId}/session-assignments`,
           { cache: 'no-store' }
         );
         const data = await r.json().catch(() => null);
         if (!r.ok) {
           const msg =
             (data && (data.error || data.message)) ||
-            `Errore caricamento sessioni (${r.status})`;
+            `Errore caricamento programmazione (${r.status})`;
           throw new Error(msg);
         }
         if (!Array.isArray(data))
-          throw new Error('Risposta sessioni assegnate non valida.');
+          throw new Error('Risposta programmazione assegnata non valida.');
         const normalized = data
           .map((row: unknown) => normalizeAssignedSession(row))
           .filter(Boolean) as AssignedSessionRow[];
@@ -633,22 +660,24 @@ export default function AthleteDetailPage() {
     }
   }
 
-  async function handleAssignEvent(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function handleAssignEventById(eventId: string) {
+    if (!athleteId) return;
     setEventAssignErr('');
-    if (!eventAssignId) {
+    if (!eventId) {
       setEventAssignErr('Seleziona un evento.');
       return;
     }
 
     setEventAssignBusy(true);
+    setEventRowBusyId(eventId);
+    let ok = false;
     try {
       const r = await fetch(
         `/api/coach/athletes/${athleteId}/event-assignments`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ eventId: eventAssignId }),
+          body: JSON.stringify({ eventId }),
         }
       );
       const data = await r.json().catch(() => null);
@@ -658,12 +687,22 @@ export default function AthleteDetailPage() {
           `Errore assegnazione evento (${r.status})`;
         throw new Error(msg);
       }
-      setEventAssignId('');
       await reloadEventAssignments();
+      ok = true;
     } catch (e: unknown) {
       setEventAssignErr(errorMessage(e));
     } finally {
       setEventAssignBusy(false);
+      setEventRowBusyId(null);
+    }
+    return ok;
+  }
+
+  async function handleAssignEvent() {
+    const ok = await handleAssignEventById(assignEventId);
+    if (ok) {
+      setAssignEventId('');
+      setShowEventAssignForm(false);
     }
   }
 
@@ -695,6 +734,47 @@ export default function AthleteDetailPage() {
     () => list.find((a) => a.athleteId === athleteId) || null,
     [list, athleteId]
   );
+
+  const filteredAssignedSessions = useMemo(() => {
+    if (sessionFilter === 'all') return assignedSessions;
+
+    const today = new Date();
+    const todayKey = toLocalDateKey(today.toISOString());
+
+    if (sessionFilter === 'today') {
+      return assignedSessions.filter(
+        (session) => toLocalDateKey(session.sessionDate) === todayKey
+      );
+    }
+
+    if (sessionFilter === 'week') {
+      const currentDay = (today.getDay() + 6) % 7;
+      const start = new Date(today);
+      start.setDate(today.getDate() - currentDay);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      const startKey = toLocalDateKey(start.toISOString());
+      const endKey = toLocalDateKey(end.toISOString());
+
+      return assignedSessions.filter((session) => {
+        const key = toLocalDateKey(session.sessionDate);
+        if (!key) return false;
+        return key >= startKey && key <= endKey;
+      });
+    }
+
+    if (sessionFilter === 'range') {
+      return assignedSessions.filter((session) => {
+        const key = toLocalDateKey(session.sessionDate);
+        if (!key) return false;
+        if (sessionDateFrom && key < sessionDateFrom) return false;
+        if (sessionDateTo && key > sessionDateTo) return false;
+        return true;
+      });
+    }
+
+    return assignedSessions;
+  }, [assignedSessions, sessionDateFrom, sessionDateTo, sessionFilter]);
 
   return (
     <main style={{ padding: 16, display: 'grid', gap: 16 }}>
@@ -737,46 +817,164 @@ export default function AthleteDetailPage() {
         ) : assignedSessionsErr ? (
           <p style={{ marginTop: 8 }}>Errore: {assignedSessionsErr}</p>
         ) : assignedSessions.length === 0 ? (
-          <p style={{ marginTop: 8 }}>Nessuna sessione assegnata.</p>
+          <p style={{ marginTop: 8 }}>Nessuna programmazione assegnata.</p>
+        ) : filteredAssignedSessions.length === 0 && sessionFilter === 'today' ? (
+          <div style={{ marginTop: 8, display: 'grid', gap: 8 }}>
+            <p>Nessuna sessione oggi.</p>
+            <button type="button" onClick={() => setSessionFilter('week')}>
+              Mostra settimana
+            </button>
+          </div>
+        ) : filteredAssignedSessions.length === 0 ? (
+          <p style={{ marginTop: 8 }}>Nessuna sessione nel periodo.</p>
         ) : null}
+
+        <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 8,
+              alignItems: 'center',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setSessionFilter('today')}
+              style={{
+                padding: '6px 10px',
+                borderRadius: 999,
+                border: '1px solid #ccc',
+                background: sessionFilter === 'today' ? '#111' : '#fff',
+                color: sessionFilter === 'today' ? '#fff' : '#111',
+                fontWeight: 600,
+              }}
+            >
+              Oggi
+            </button>
+            <button
+              type="button"
+              onClick={() => setSessionFilter('week')}
+              style={{
+                padding: '6px 10px',
+                borderRadius: 999,
+                border: '1px solid #ccc',
+                background: sessionFilter === 'week' ? '#111' : '#fff',
+                color: sessionFilter === 'week' ? '#fff' : '#111',
+                fontWeight: 600,
+              }}
+            >
+              Settimana
+            </button>
+            <button
+              type="button"
+              onClick={() => setSessionFilter('range')}
+              style={{
+                padding: '6px 10px',
+                borderRadius: 999,
+                border: '1px solid #ccc',
+                background: sessionFilter === 'range' ? '#111' : '#fff',
+                color: sessionFilter === 'range' ? '#fff' : '#111',
+                fontWeight: 600,
+              }}
+            >
+              Periodo
+            </button>
+            <button
+              type="button"
+              onClick={() => setSessionFilter('all')}
+              style={{
+                padding: '6px 10px',
+                borderRadius: 999,
+                border: '1px solid #ccc',
+                background: sessionFilter === 'all' ? '#111' : '#fff',
+                color: sessionFilter === 'all' ? '#fff' : '#111',
+                fontWeight: 600,
+              }}
+            >
+              Tutte
+            </button>
+          </div>
+
+          {sessionFilter === 'range' ? (
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span>Da</span>
+                <input
+                  type="date"
+                  value={sessionDateFrom}
+                  onChange={(e) => setSessionDateFrom(e.target.value)}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span>A</span>
+                <input
+                  type="date"
+                  value={sessionDateTo}
+                  onChange={(e) => setSessionDateTo(e.target.value)}
+                />
+              </label>
+            </div>
+          ) : null}
+        </div>
 
         <div style={{ marginTop: 12, overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
-                  Data
-                </th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
-                  Titolo
-                </th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
-                  Stato
-                </th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
-                  Azioni
+                  Programmazione
                 </th>
               </tr>
             </thead>
             <tbody>
-              {assignedSessions.map((session) => {
-                const dateLabel = toDateInputValue(session.date);
+              {filteredAssignedSessions.map((session) => {
+                const dateLabel = toDateInputValue(session.sessionDate);
                 return (
-                  <tr key={session.assignedSessionId}>
-                    <td style={{ padding: '6px 4px' }}>{dateLabel || '-'}</td>
+                  <tr
+                    key={session.assignmentId}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => router.push(`/coach/sessions/${session.sessionId}`)}
+                  >
                     <td style={{ padding: '6px 4px' }}>
-                      {titleCaseIt(session.title)}
-                    </td>
-                    <td style={{ padding: '6px 4px' }}>
-                      {formatStatusItUpper(session.status)}
-                    </td>
-                    <td style={{ padding: '6px 4px' }}>
-                      <Link
-                        href={`/coach/assigned-sessions/${session.assignedSessionId}`}
-                        style={{ textDecoration: 'underline' }}
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                        }}
                       >
-                        Apri
-                      </Link>
+                        <div style={{ display: 'grid', gap: 4 }}>
+                          <div>
+                            <strong>Data:</strong> {dateLabel || '-'}
+                          </div>
+                          <div>
+                            <strong>Titolo:</strong> {titleCaseIt(session.title)}
+                          </div>
+                          <div>
+                            <strong>Note:</strong> {session.notesPublic || '-'}
+                          </div>
+                        </div>
+                        <Link
+                          href={`/coach/sessions/${session.sessionId}?athleteId=${athleteId}`}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '6px 12px',
+                            borderRadius: 8,
+                            border: '1px solid #ccc',
+                            background: '#fff',
+                            textDecoration: 'none',
+                            color: 'inherit',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Apri
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -797,6 +995,64 @@ export default function AthleteDetailPage() {
         ) : null}
 
         {rowErr ? <p style={{ marginTop: 8 }}>Errore: {rowErr}</p> : null}
+
+        <div style={{ marginTop: 12 }}>
+          {!showAssignForm ? (
+            <button type="button" onClick={() => setShowAssignForm(true)}>
+              Assegna gara
+            </button>
+          ) : (
+            <form onSubmit={handleAssignCompetition} style={{ display: 'grid', gap: 8 }}>
+              <div style={{ display: 'grid', gap: 6 }}>
+                <label>
+                  Gara
+                  <select
+                    value={assignCompetitionId}
+                    disabled={libraryLoading}
+                    onChange={(e) => setAssignCompetitionId(e.target.value)}
+                  >
+                    <option value="">Seleziona gara</option>
+                    {library.map((item) => (
+                      <option key={item.competitionId} value={item.competitionId}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={assignIsTarget}
+                    onChange={(e) => setAssignIsTarget(e.target.checked)}
+                  />
+                  Gara obiettivo
+                </label>
+              </div>
+
+              {libraryLoading ? <p>Caricamento libreria...</p> : null}
+              {libraryErr ? <p>Errore: {libraryErr}</p> : null}
+              {assignErr ? <p>Errore: {assignErr}</p> : null}
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="submit" disabled={assignBusy || libraryLoading}>
+                  Assegna
+                </button>
+                <button
+                  type="button"
+                  disabled={assignBusy}
+                  onClick={() => {
+                    setShowAssignForm(false);
+                    setAssignErr('');
+                    setAssignCompetitionId('');
+                    setAssignIsTarget(false);
+                  }}
+                >
+                  Annulla
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
 
         <div style={{ marginTop: 12, overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -864,56 +1120,64 @@ export default function AthleteDetailPage() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 10 }}>
+        <h2 style={{ margin: 0 }}>Eventi</h2>
+
+        {eventsLoading ? (
+          <p style={{ marginTop: 8 }}>Caricamento eventi...</p>
+        ) : eventsErr ? (
+          <p style={{ marginTop: 8 }}>Errore: {eventsErr}</p>
+        ) : events.length === 0 ? (
+          <p style={{ marginTop: 8 }}>Nessun evento disponibile.</p>
+        ) : null}
+
+        {eventAssignErr ? <p style={{ marginTop: 8 }}>Errore: {eventAssignErr}</p> : null}
 
         <div style={{ marginTop: 12 }}>
-          {!showAssignForm ? (
-            <button type="button" onClick={() => setShowAssignForm(true)}>
-              Assegna gara
+          {!showEventAssignForm ? (
+            <button type="button" onClick={() => setShowEventAssignForm(true)}>
+              Assegna evento
             </button>
           ) : (
-            <form onSubmit={handleAssignCompetition} style={{ display: 'grid', gap: 8 }}>
-              <div style={{ display: 'grid', gap: 6 }}>
-                <label>
-                  Gara
-                  <select
-                    value={assignCompetitionId}
-                    disabled={libraryLoading}
-                    onChange={(e) => setAssignCompetitionId(e.target.value)}
-                  >
-                    <option value="">Seleziona gara</option>
-                    {library.map((item) => (
-                      <option key={item.competitionId} value={item.competitionId}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input
-                    type="checkbox"
-                    checked={assignIsTarget}
-                    onChange={(e) => setAssignIsTarget(e.target.checked)}
-                  />
-                  Gara obiettivo
-                </label>
-              </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleAssignEvent();
+              }}
+              style={{ display: 'grid', gap: 8 }}
+            >
+              <label>
+                Evento
+                <select
+                  value={assignEventId}
+                  disabled={eventsLoading}
+                  onChange={(e) => setAssignEventId(e.target.value)}
+                >
+                  <option value="">Seleziona evento</option>
+                  {events.map((ev) => (
+                    <option key={ev.eventId} value={ev.eventId}>
+                      {ev.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-              {libraryLoading ? <p>Caricamento libreria...</p> : null}
-              {libraryErr ? <p>Errore: {libraryErr}</p> : null}
-              {assignErr ? <p>Errore: {assignErr}</p> : null}
+              {eventsLoading ? <p>Caricamento eventi...</p> : null}
+              {eventsErr ? <p>Errore: {eventsErr}</p> : null}
 
               <div style={{ display: 'flex', gap: 8 }}>
-                <button type="submit" disabled={assignBusy || libraryLoading}>
+                <button type="submit" disabled={eventAssignBusy || eventsLoading}>
                   Assegna
                 </button>
                 <button
                   type="button"
-                  disabled={assignBusy}
+                  disabled={eventAssignBusy}
                   onClick={() => {
-                    setShowAssignForm(false);
-                    setAssignErr('');
-                    setAssignCompetitionId('');
-                    setAssignIsTarget(false);
+                    setShowEventAssignForm(false);
+                    setAssignEventId('');
+                    setEventAssignErr('');
                   }}
                 >
                   Annulla
@@ -921,38 +1185,6 @@ export default function AthleteDetailPage() {
               </div>
             </form>
           )}
-        </div>
-      </section>
-
-      <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 10 }}>
-        <h2 style={{ margin: 0 }}>Eventi</h2>
-
-        <div style={{ marginTop: 8 }}>
-          <form onSubmit={handleAssignEvent} style={{ display: 'grid', gap: 8 }}>
-            <label>
-              Assegna evento
-              <select
-                value={eventAssignId}
-                disabled={eventsLoading}
-                onChange={(e) => setEventAssignId(e.target.value)}
-              >
-                <option value="">Seleziona evento</option>
-                {events.map((ev) => (
-                  <option key={ev.eventId} value={ev.eventId}>
-                    {ev.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button type="submit" disabled={eventAssignBusy || eventsLoading}>
-                Assegna
-              </button>
-            </div>
-            {eventsLoading ? <p>Caricamento eventi...</p> : null}
-            {eventsErr ? <p>Errore: {eventsErr}</p> : null}
-            {eventAssignErr ? <p>Errore: {eventAssignErr}</p> : null}
-          </form>
         </div>
 
         <div style={{ marginTop: 12 }}>

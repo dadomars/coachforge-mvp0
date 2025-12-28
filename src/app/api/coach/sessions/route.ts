@@ -152,6 +152,11 @@ export async function GET() {
       title: true,
       sessionDate: true,
       _count: { select: { assignments: true } },
+      assignments: {
+        select: {
+          athlete: { select: { firstName: true, lastName: true } },
+        },
+      },
     },
   });
 
@@ -161,6 +166,9 @@ export async function GET() {
       title: row.title,
       sessionDate: row.sessionDate,
       assignedCount: row._count.assignments,
+      assignedAthletes: row.assignments.map((assignment) =>
+        `${assignment.athlete.firstName} ${assignment.athlete.lastName}`.trim()
+      ),
     }))
   );
 }

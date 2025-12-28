@@ -91,7 +91,7 @@ function normalizeExercise(value: unknown): ExerciseRow | null {
 function normalizeSessionDetail(value: unknown): SessionDetail | null {
   if (!value || typeof value !== "object") return null;
   const rec = value as Record<string, unknown>;
-  const sessionId = asString(rec.sessionId);
+  const sessionId = asString(rec.sessionId) || asString(rec.assignedSessionId);
   const title = asString(rec.title);
   if (!sessionId || !title) return null;
 
@@ -123,7 +123,7 @@ function normalizeSessionDetail(value: unknown): SessionDetail | null {
           };
         })
         .filter(Boolean) as SessionRow[];
-      if (!blockId || !name) return null;
+      if (!blockId) return null;
       return { blockId, name, rows };
     })
     .filter(Boolean) as SessionBlock[];
@@ -131,7 +131,7 @@ function normalizeSessionDetail(value: unknown): SessionDetail | null {
   return {
     sessionId,
     title,
-    sessionDate: asString(rec.sessionDate) || null,
+    sessionDate: asString(rec.sessionDate) || asString(rec.date) || null,
     notesPublic: asString(rec.notesPublic),
     notesPrivate: asString(rec.notesPrivate),
     updatedAt: asString(rec.updatedAt),
@@ -400,8 +400,14 @@ export default function AssignedSessionDetailPage() {
     setLoading(true);
     setError("");
     try {
-      const r = await fetch(`/api/coach/sessions/${sessionId}`, { cache: "no-store" });
-      const data = await r.json().catch(() => null);
+      const assignedUrl = `/api/coach/assigned-sessions/${sessionId}`;
+      const sessionUrl = `/api/coach/sessions/${sessionId}`;
+      let r = await fetch(assignedUrl, { cache: "no-store" });
+      let data = await r.json().catch(() => null);
+      if (!r.ok && r.status === 404) {
+        r = await fetch(sessionUrl, { cache: "no-store" });
+        data = await r.json().catch(() => null);
+      }
       if (!r.ok) {
         const msg =
           (data && (data.error || data.message)) ||
@@ -520,6 +526,8 @@ export default function AssignedSessionDetailPage() {
     });
     return map;
   }, [exercises]);
+
+  const detailBlocks = detail?.blocks ?? [];
 
   const groupedExercises = useMemo(() => {
     const buckets: Record<string, ExerciseRow[]> = {
@@ -1277,8 +1285,23 @@ export default function AssignedSessionDetailPage() {
               <div>{detail?.notesPrivate || "—"}</div>
             </div>
 
+            {detailBlocks.length === 0 ? (
+              <div
+                style={{
+                  padding: 12,
+                  borderRadius: 12,
+                  border: "1px solid #f1c36d",
+                  background: "#fff7e6",
+                  color: "#6a4a00",
+                  fontWeight: 600,
+                }}
+              >
+                Sessione senza blocchi (creata prima dei fix).
+              </div>
+            ) : null}
+
             <div className="space-y-6">
-              {(detail?.blocks ?? []).map((block, blockIndex) => {
+              {detailBlocks.map((block, blockIndex) => {
                 const renderBlockTable = (rows: typeof block.rows) => (
                   <div className="overflow-x-auto -mx-2 px-2">
                     <table className="min-w-[1300px] w-full border-collapse table-fixed text-sm leading-6">
@@ -1414,7 +1437,8 @@ export default function AssignedSessionDetailPage() {
                     }}
                   >
                     <strong>
-                      Blocco {blockIndex + 1}: {block.name}
+                      Blocco {blockIndex + 1}
+                      {block.name ? `: ${block.name}` : ""}
                     </strong>
                     <div className="space-y-4">
                       {renderBlockTable(block.rows)}

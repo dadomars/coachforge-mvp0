@@ -8,6 +8,7 @@ type SessionRow = {
   title: string;
   sessionDate: string | null;
   assignedCount: number;
+  assignedAthletes: string[];
 };
 
 type AthleteRow = {
@@ -34,12 +35,18 @@ function normalizeSession(value: unknown): SessionRow | null {
   const title = asString(rec.title);
   const sessionDate = asString(rec.sessionDate);
   const assignedCount = Number(rec.assignedCount ?? 0);
+  const assignedAthletes = Array.isArray(rec.assignedAthletes)
+    ? rec.assignedAthletes
+        .map((name) => asString(name).trim())
+        .filter((name) => name.length > 0)
+    : [];
   if (!sessionId || !title) return null;
   return {
     sessionId,
     title,
     sessionDate: sessionDate || null,
     assignedCount: Number.isFinite(assignedCount) ? assignedCount : 0,
+    assignedAthletes,
   };
 }
 
@@ -75,6 +82,26 @@ function sortAthletes(a: AthleteRow, b: AthleteRow) {
   return aName.localeCompare(bName);
 }
 
+function formatAssignedNames(names: string[]) {
+  if (names.length === 0) {
+    return { label: "0", title: "", extraCount: 0, primary: [] as string[] };
+  }
+  if (names.length <= 2) {
+    return {
+      label: names.join(", "),
+      title: names.join(", "),
+      extraCount: 0,
+      primary: names,
+    };
+  }
+  return {
+    label: `${names[0]}, ${names[1]}`,
+    title: names.join(", "),
+    extraCount: names.length - 2,
+    primary: names.slice(0, 2),
+  };
+}
+
 export default function CoachAssignedSessionsPage() {
   const [list, setList] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,6 +119,10 @@ export default function CoachAssignedSessionsPage() {
   const [assignedLoading, setAssignedLoading] = useState(false);
   const [assignedError, setAssignedError] = useState("");
   const [assignBusy, setAssignBusy] = useState(false);
+  const [assignedModal, setAssignedModal] = useState<{
+    title: string;
+    names: string[];
+  } | null>(null);
 
   async function loadSessions() {
     setLoading(true);
@@ -281,6 +312,10 @@ export default function CoachAssignedSessionsPage() {
     }
   }
 
+  function openAssignedModal(title: string, names: string[]) {
+    setAssignedModal({ title, names });
+  }
+
   const filteredAthletes = useMemo(() => {
     const q = assignSearch.trim().toLowerCase();
     const sorted = [...athletes].sort(sortAthletes);
@@ -352,40 +387,72 @@ export default function CoachAssignedSessionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {list.map((row) => (
-                  <tr key={row.sessionId}>
-                    <td style={{ padding: "6px 4px" }}>{row.title}</td>
-                    <td style={{ padding: "6px 4px" }}>{formatDate(row.sessionDate)}</td>
-                    <td style={{ padding: "6px 4px" }}>{row.assignedCount}</td>
-                    <td style={{ padding: "6px 4px", display: "flex", gap: 8 }}>
-                      <Link
-                        href={`/coach/assigned-sessions/${row.sessionId}`}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          padding: "6px 10px",
-                          borderRadius: 8,
-                          border: "1px solid #ccc",
-                          background: "#fff",
-                          textDecoration: "none",
-                          color: "inherit",
-                          fontWeight: 600,
-                        }}
-                      >
-                        Apri
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => openAssignPanel(row.sessionId, row.sessionDate)}
-                      >
-                        Assegna
-                      </button>
-                      <button type="button" onClick={() => handleDeleteSession(row.sessionId)}>
-                        Elimina
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {list.map((row) => {
+                  const display = formatAssignedNames(row.assignedAthletes);
+                  return (
+                    <tr key={row.sessionId}>
+                      <td style={{ padding: "6px 4px" }}>{row.title}</td>
+                      <td style={{ padding: "6px 4px" }}>{formatDate(row.sessionDate)}</td>
+                      <td style={{ padding: "6px 4px" }}>
+                        {display.label === "0" ? (
+                          "0"
+                        ) : (
+                          <span title={display.title}>
+                            {display.label}
+                            {display.extraCount > 0 ? (
+                              <>
+                                {" "}
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    openAssignedModal(row.title, row.assignedAthletes)
+                                  }
+                                  style={{
+                                    border: "none",
+                                    background: "transparent",
+                                    padding: 0,
+                                    color: "#0b5bd3",
+                                    cursor: "pointer",
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  +{display.extraCount}
+                                </button>
+                              </>
+                            ) : null}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: "6px 4px", display: "flex", gap: 8 }}>
+                        <Link
+                          href={`/coach/assigned-sessions/${row.sessionId}`}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            padding: "6px 10px",
+                            borderRadius: 8,
+                            border: "1px solid #ccc",
+                            background: "#fff",
+                            textDecoration: "none",
+                            color: "inherit",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Apri
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => openAssignPanel(row.sessionId, row.sessionDate)}
+                        >
+                          Assegna
+                        </button>
+                        <button type="button" onClick={() => handleDeleteSession(row.sessionId)}>
+                          Elimina
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -485,6 +552,52 @@ export default function CoachAssignedSessionsPage() {
               )}
             </div>
           </section>
+        ) : null}
+
+        {assignedModal ? (
+          <div
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setAssignedModal(null)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0, 0, 0, 0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+              zIndex: 50,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "100%",
+                maxWidth: 420,
+                maxHeight: "80vh",
+                background: "#fff",
+                borderRadius: 12,
+                padding: 16,
+                display: "grid",
+                gap: 12,
+                overflowY: "auto",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <strong>Atleti assegnati</strong>
+                <button type="button" onClick={() => setAssignedModal(null)}>
+                  Chiudi
+                </button>
+              </div>
+              <div style={{ fontWeight: 600 }}>{assignedModal.title}</div>
+              <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 6 }}>
+                {assignedModal.names.map((name, idx) => (
+                  <li key={`${name}-${idx}`}>{name}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
         ) : null}
       </section>
     </main>
