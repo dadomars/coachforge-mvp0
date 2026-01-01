@@ -335,6 +335,11 @@ model SessionAssignment {
   sessionId    String   @map("session_id")
   athleteId    String   @map("athlete_id")
   assignedAt   DateTime @default(now()) @map("assigned_at")
+  status       SessionAssignmentStatus @default(TODO) @map("status")
+  performedAt  DateTime? @map("performed_at")
+  durationMin  Int? @map("duration_min")
+  rpe          Int? @map("rpe")
+  note         String? @map("note")
 
   session Session @relation(fields: [sessionId], references: [sessionId], onDelete: Cascade)
   athlete Athlete @relation(fields: [athleteId], references: [athleteId], onDelete: Cascade)
@@ -343,6 +348,12 @@ model SessionAssignment {
   @@index([sessionId], map: "idx_session_assignment_session_id")
   @@index([athleteId], map: "idx_session_assignment_athlete_id")
   @@map("session_assignment")
+}
+
+enum SessionAssignmentStatus {
+  TODO
+  DONE
+  SKIPPED
 }
 
 model CompetitionAssignment {

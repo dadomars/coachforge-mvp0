@@ -34,6 +34,17 @@ function toLocalDateKey(value: string | null | undefined): string {
   )}`;
 }
 
+function formatDateIT(value: string | null | undefined): string {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return new Intl.DateTimeFormat('it-IT', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(date);
+}
+
 function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message;
 
@@ -108,6 +119,11 @@ type AssignedSessionRow = {
   title: string;
   notesPublic: string;
   createdAt?: string;
+  status: 'TODO' | 'DONE' | 'SKIPPED';
+  performedAt?: string | null;
+  durationMin?: number | null;
+  rpe?: number | null;
+  note?: string | null;
 };
 
 function normalizeCompetition(value: unknown): CompetitionLibraryRow | null {
@@ -199,6 +215,8 @@ function normalizeAssignedSession(value: unknown): AssignedSessionRow | null {
   const assignedAt = asString(rec['assignedAt']);
   const title = asString(rec['title']);
   if (!assignmentId || !sessionId || !assignedAt || !title) return null;
+  const status = asString(rec['status']) as AssignedSessionRow['status'];
+  if (!['TODO', 'DONE', 'SKIPPED'].includes(status)) return null;
   return {
     assignmentId,
     sessionId,
@@ -207,6 +225,21 @@ function normalizeAssignedSession(value: unknown): AssignedSessionRow | null {
     title,
     notesPublic: asString(rec['notesPublic']),
     createdAt: asString(rec['createdAt']) || undefined,
+    status,
+    performedAt: asString(rec['performedAt']) || null,
+    durationMin:
+      typeof rec['durationMin'] === 'number'
+        ? rec['durationMin']
+        : Number.isFinite(Number(rec['durationMin']))
+        ? Number(rec['durationMin'])
+        : null,
+    rpe:
+      typeof rec['rpe'] === 'number'
+        ? rec['rpe']
+        : Number.isFinite(Number(rec['rpe']))
+        ? Number(rec['rpe'])
+        : null,
+    note: asString(rec['note']) || null,
   };
 }
 export default function AthleteDetailPage() {
@@ -764,17 +797,26 @@ export default function AthleteDetailPage() {
     }
 
     if (sessionFilter === 'range') {
+      if (!sessionDateFrom) return [];
+      const start = new Date(sessionDateFrom);
+      start.setHours(0, 0, 0, 0);
+      const end = sessionDateTo ? new Date(sessionDateTo) : new Date();
+      end.setHours(23, 59, 59, 999);
       return assignedSessions.filter((session) => {
-        const key = toLocalDateKey(session.sessionDate);
-        if (!key) return false;
-        if (sessionDateFrom && key < sessionDateFrom) return false;
-        if (sessionDateTo && key > sessionDateTo) return false;
-        return true;
+        if (!session.sessionDate) return false;
+        const sessionDate = new Date(session.sessionDate);
+        if (Number.isNaN(sessionDate.getTime())) return false;
+        return sessionDate >= start && sessionDate <= end;
       });
     }
 
     return assignedSessions;
   }, [assignedSessions, sessionDateFrom, sessionDateTo, sessionFilter]);
+
+  function handleResetRange() {
+    setSessionDateFrom('');
+    setSessionDateTo('');
+  }
 
   return (
     <main style={{ padding: 16, display: 'grid', gap: 16 }}>
@@ -825,6 +867,8 @@ export default function AthleteDetailPage() {
               Mostra settimana
             </button>
           </div>
+        ) : sessionFilter === 'range' && !sessionDateFrom ? (
+          <p style={{ marginTop: 8 }}>Seleziona almeno la data di inizio.</p>
         ) : filteredAssignedSessions.length === 0 ? (
           <p style={{ marginTop: 8 }}>Nessuna sessione nel periodo.</p>
         ) : null}
@@ -914,74 +958,116 @@ export default function AthleteDetailPage() {
                   onChange={(e) => setSessionDateTo(e.target.value)}
                 />
               </label>
+              <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                <button type="button" onClick={handleResetRange}>
+                  Reset
+                </button>
+              </div>
             </div>
           ) : null}
         </div>
 
-        <div style={{ marginTop: 12, overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
-                  Programmazione
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredAssignedSessions.map((session) => {
-                const dateLabel = toDateInputValue(session.sessionDate);
-                return (
-                  <tr
-                    key={session.assignmentId}
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => router.push(`/coach/sessions/${session.sessionId}`)}
-                  >
-                    <td style={{ padding: '6px 4px' }}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 12,
-                        }}
-                      >
-                        <div style={{ display: 'grid', gap: 4 }}>
-                          <div>
-                            <strong>Data:</strong> {dateLabel || '-'}
-                          </div>
-                          <div>
-                            <strong>Titolo:</strong> {titleCaseIt(session.title)}
-                          </div>
-                          <div>
-                            <strong>Note:</strong> {session.notesPublic || '-'}
-                          </div>
-                        </div>
-                        <Link
-                          href={`/coach/sessions/${session.sessionId}?athleteId=${athleteId}`}
-                          onClick={(e) => e.stopPropagation()}
+        {sessionFilter === 'range' && !sessionDateFrom ? null : (
+          <div style={{ marginTop: 12, overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                    Programmazione
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredAssignedSessions.map((session) => {
+                  const dateLabel = formatDateIT(session.sessionDate);
+                  const returnTo = encodeURIComponent(`/coach/athletes/${athleteId}`);
+                  const badgeLabel =
+                    session.status === 'DONE'
+                      ? 'DONE'
+                      : session.status === 'SKIPPED'
+                      ? 'SKIPPED'
+                      : 'TODO';
+                  return (
+                    <tr
+                      key={session.assignmentId}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() =>
+                        router.push(
+                          `/coach/sessions/${session.sessionId}?returnTo=${returnTo}`
+                        )
+                      }
+                    >
+                      <td style={{ padding: '6px 4px' }}>
+                        <div
                           style={{
-                            display: 'inline-flex',
+                            display: 'flex',
                             alignItems: 'center',
-                            padding: '6px 12px',
-                            borderRadius: 8,
-                            border: '1px solid #ccc',
-                            background: '#fff',
-                            textDecoration: 'none',
-                            color: 'inherit',
-                            fontWeight: 600,
-                            whiteSpace: 'nowrap',
+                            justifyContent: 'space-between',
+                            gap: 12,
                           }}
                         >
-                          Apri
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                          <div style={{ display: 'grid', gap: 4 }}>
+                            <div>
+                              <strong>Data:</strong> {dateLabel || '-'}
+                            </div>
+                            <div>
+                              <strong>Titolo:</strong> {titleCaseIt(session.title)}
+                            </div>
+                            <div>
+                              <strong>Note:</strong> {session.notesPublic || '-'}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              <span
+                                style={{
+                                  padding: '2px 8px',
+                                  borderRadius: 999,
+                                  border: '1px solid #ccc',
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  textTransform: 'uppercase',
+                                }}
+                              >
+                                {badgeLabel}
+                              </span>
+                              {session.rpe != null ? (
+                                <span style={{ fontSize: 12 }}>
+                                  RPE {session.rpe}
+                                </span>
+                              ) : null}
+                              {session.durationMin != null ? (
+                                <span style={{ fontSize: 12 }}>
+                                  Durata {session.durationMin}'
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                          <Link
+                            href={`/coach/sessions/${session.sessionId}?returnTo=${returnTo}`}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '6px 12px',
+                              borderRadius: 8,
+                              border: '1px solid #ccc',
+                              background: '#fff',
+                              textDecoration: 'none',
+                              color: 'inherit',
+                              fontWeight: 600,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            Apri
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 10 }}>
