@@ -37,6 +37,11 @@ export async function GET(
     select: {
       assignmentId: true,
       assignedAt: true,
+      status: true,
+      performedAt: true,
+      durationMin: true,
+      rpe: true,
+      note: true,
       session: {
         select: {
           sessionId: true,
@@ -53,6 +58,11 @@ export async function GET(
     assignments.map((assignment) => ({
       assignmentId: assignment.assignmentId,
       assignedAt: assignment.assignedAt,
+      status: assignment.status,
+      performedAt: assignment.performedAt,
+      durationMin: assignment.durationMin,
+      rpe: assignment.rpe,
+      note: assignment.note,
       sessionId: assignment.session.sessionId,
       title: assignment.session.title,
       sessionDate: assignment.session.sessionDate,

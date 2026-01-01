@@ -33,6 +33,15 @@ type SessionDetail = {
   blocks: SessionBlock[];
 };
 
+type AssignmentResult = {
+  assignmentId: string;
+  status: "TODO" | "DONE" | "SKIPPED";
+  performedAt: string | null;
+  durationMin: number | null;
+  rpe: number | null;
+  note: string | null;
+};
+
 function asString(value: unknown): string {
   return typeof value === "string" ? value : value == null ? "" : String(value);
 }
@@ -43,9 +52,24 @@ function asNumberString(value: unknown): string {
   return typeof value === "string" ? value : String(value);
 }
 
-function formatDate(value: string | null) {
+function formatDateIT(value: string | null | undefined) {
   if (!value) return "-";
-  return value.length >= 10 ? value.slice(0, 10) : value;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("it-IT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
+function decodeReturnTo(value: string | null): string {
+  if (!value) return "";
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function normalizeDetail(value: unknown): SessionDetail | null {
@@ -112,6 +136,18 @@ export default function CoachSessionDetailPage() {
     ? params.sessionId[0]
     : params.sessionId;
   const athleteId = searchParams.get("athleteId")?.trim() || "";
+  const returnToParam = searchParams.get("returnTo");
+  const returnTo = decodeReturnTo(returnToParam);
+  const [assignment, setAssignment] = useState<AssignmentResult | null>(null);
+  const [assignmentLoading, setAssignmentLoading] = useState(false);
+  const [assignmentError, setAssignmentError] = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
+  const [resultsStatus, setResultsStatus] =
+    useState<AssignmentResult["status"]>("TODO");
+  const [resultsDuration, setResultsDuration] = useState("");
+  const [resultsRpe, setResultsRpe] = useState("");
+  const [resultsPerformedAt, setResultsPerformedAt] = useState("");
+  const [resultsNote, setResultsNote] = useState("");
 
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -157,21 +193,138 @@ export default function CoachSessionDetailPage() {
     };
   }, [sessionId]);
 
+  useEffect(() => {
+    let alive = true;
+
+    async function loadAssignment() {
+      if (!athleteId || !sessionId) return;
+      setAssignmentLoading(true);
+      setAssignmentError("");
+      try {
+        const r = await fetch(
+          `/api/coach/athletes/${athleteId}/session-assignments`,
+          { cache: "no-store" }
+        );
+        const data = await r.json().catch(() => null);
+        if (!r.ok) {
+          const msg =
+            (data && (data.error || data.message)) ||
+            `Errore caricamento risultati (${r.status})`;
+          throw new Error(msg);
+        }
+        if (!Array.isArray(data)) {
+          throw new Error("Risposta risultati non valida.");
+        }
+        const match = data.find(
+          (item: { sessionId?: string }) => item?.sessionId === sessionId
+        );
+        if (!match) {
+          if (alive) setAssignment(null);
+          return;
+        }
+        const normalized: AssignmentResult = {
+          assignmentId: asString(match.assignmentId),
+          status: ["TODO", "DONE", "SKIPPED"].includes(match.status)
+            ? match.status
+            : "TODO",
+          performedAt: asString(match.performedAt) || null,
+          durationMin:
+            typeof match.durationMin === "number"
+              ? match.durationMin
+              : match.durationMin == null
+              ? null
+              : Number(match.durationMin),
+          rpe:
+            typeof match.rpe === "number"
+              ? match.rpe
+              : match.rpe == null
+              ? null
+              : Number(match.rpe),
+          note: typeof match.note === "string" ? match.note : null,
+        };
+        if (alive) {
+          setAssignment(normalized);
+          setResultsStatus(normalized.status);
+          setResultsPerformedAt(
+            normalized.performedAt ? normalized.performedAt.slice(0, 10) : ""
+          );
+          setResultsDuration(
+            normalized.durationMin != null ? String(normalized.durationMin) : ""
+          );
+          setResultsRpe(normalized.rpe != null ? String(normalized.rpe) : "");
+          setResultsNote(normalized.note ?? "");
+        }
+      } catch (e) {
+        if (alive) {
+          setAssignmentError(
+            e instanceof Error ? e.message : "Errore sconosciuto."
+          );
+        }
+      } finally {
+        if (alive) setAssignmentLoading(false);
+      }
+    }
+
+    loadAssignment();
+
+    return () => {
+      alive = false;
+    };
+  }, [athleteId, sessionId]);
+
+  async function handleSaveResults() {
+    if (!assignment) return;
+    setSaveMessage("");
+    try {
+      const payload = {
+        status: resultsStatus,
+        performedAt: resultsPerformedAt ? resultsPerformedAt : null,
+        durationMin: resultsDuration ? Number(resultsDuration) : null,
+        rpe: resultsRpe ? Number(resultsRpe) : null,
+        note: resultsNote,
+      };
+      const r = await fetch(
+        `/api/coach/session-assignments/${assignment.assignmentId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        const msg =
+          (data && (data.error || data.message)) ||
+          `Errore salvataggio (${r.status})`;
+        throw new Error(msg);
+      }
+      setAssignment((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: data.status ?? prev.status,
+              performedAt: data.performedAt ?? prev.performedAt,
+              durationMin: data.durationMin ?? prev.durationMin,
+              rpe: data.rpe ?? prev.rpe,
+              note: data.note ?? prev.note,
+            }
+          : prev
+      );
+      setSaveMessage("Risultati salvati.");
+    } catch (e) {
+      setSaveMessage(e instanceof Error ? e.message : "Errore sconosciuto.");
+    }
+  }
+
   return (
     <main style={{ maxWidth: 1100, margin: "36px auto", padding: 16 }}>
       <section style={{ display: "flex", gap: 12, alignItems: "center" }}>
-        {athleteId ? (
-          <Link
-            href={`/coach/athletes/${athleteId}`}
-            style={{ textDecoration: "underline" }}
-          >
-            ← Torna a scheda atleta
-          </Link>
-        ) : (
-          <Link href="/coach/sessions" style={{ textDecoration: "underline" }}>
-            ← Torna alle sessioni
-          </Link>
-        )}
+        <Link
+          href={returnTo || "/coach/sessions"}
+          style={{ textDecoration: "underline" }}
+        >
+          Torna indietro
+        </Link>
       </section>
 
       <section style={{ marginTop: 16, padding: 12, border: "1px solid #ddd", borderRadius: 10 }}>
@@ -189,14 +342,16 @@ export default function CoachSessionDetailPage() {
               <strong>Titolo:</strong> {detail.title}
             </div>
             <div>
-              <strong>Data:</strong> {formatDate(detail.sessionDate)}
+              <strong>Data:</strong> {formatDateIT(detail.sessionDate)}
             </div>
             <div>
-              <strong>Note pubbliche:</strong> {detail.notesPublic || "-"}
+              <strong>Note:</strong> {detail.notesPublic || "-"}
             </div>
 
             {detail.blocks.length === 0 ? (
-              <p style={{ marginTop: 8 }}>Sessione senza blocchi.</p>
+              <p style={{ marginTop: 8 }}>
+                Sessione senza blocchi (creata prima dei fix).
+              </p>
             ) : (
               <div style={{ display: "grid", gap: 12, marginTop: 8 }}>
                 {detail.blocks.map((block, blockIndex) => (
@@ -268,6 +423,85 @@ export default function CoachSessionDetailPage() {
                 ))}
               </div>
             )}
+
+            {athleteId ? (
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: 12,
+                  borderRadius: 12,
+                  border: "1px solid #ddd",
+                  display: "grid",
+                  gap: 10,
+                }}
+              >
+                <strong>Risultati</strong>
+                {assignmentLoading ? <p>Caricamento risultati...</p> : null}
+                {assignmentError ? <p>Errore: {assignmentError}</p> : null}
+                {!assignmentLoading && !assignmentError && !assignment ? (
+                  <p>Risultati non disponibili per questo atleta.</p>
+                ) : null}
+                {assignment ? (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <label style={{ display: "grid", gap: 4 }}>
+                      <span>Status</span>
+                      <select
+                        value={resultsStatus}
+                        onChange={(e) =>
+                          setResultsStatus(
+                            e.target.value as AssignmentResult["status"]
+                          )
+                        }
+                      >
+                        <option value="TODO">TODO</option>
+                        <option value="DONE">DONE</option>
+                        <option value="SKIPPED">SKIPPED</option>
+                      </select>
+                    </label>
+                    <label style={{ display: "grid", gap: 4 }}>
+                      <span>Durata (min)</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={resultsDuration}
+                        onChange={(e) => setResultsDuration(e.target.value)}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: 4 }}>
+                      <span>RPE (1-10)</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={resultsRpe}
+                        onChange={(e) => setResultsRpe(e.target.value)}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: 4 }}>
+                      <span>Data svolgimento</span>
+                      <input
+                        type="date"
+                        value={resultsPerformedAt}
+                        onChange={(e) => setResultsPerformedAt(e.target.value)}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: 4 }}>
+                      <span>Nota</span>
+                      <textarea
+                        value={resultsNote}
+                        onChange={(e) => setResultsNote(e.target.value)}
+                      />
+                    </label>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <button type="button" onClick={handleSaveResults}>
+                        Salva risultati
+                      </button>
+                      {saveMessage ? <span>{saveMessage}</span> : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </section>
