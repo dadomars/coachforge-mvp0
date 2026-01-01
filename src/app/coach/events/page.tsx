@@ -1,13 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import ForbiddenBanner from "@/components/ForbiddenBanner";
-import {
-  formatStatusItUpper,
-  formatTypeUpper,
-  titleCaseIt,
-} from "@/lib/ui/formatters";
+import { formatStatusItUpper, formatTypeUpper } from "@/lib/ui/formatters";
 
 type EventStatus = "PLANNED" | "DONE" | "CANCELLED";
 
@@ -54,6 +50,15 @@ function parseDateInputValue(value: string): Date | null {
   if (!value) return null;
   const parsed = new Date(`${value}T00:00:00`);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function toTitleCaseDisplay(value: string): string {
+  if (!value) return "";
+  return value.replace(/[A-Za-zÀ-ÖØ-öø-ÿ]+/g, (word) => {
+    if (word === word.toUpperCase() && word.length <= 4) return word;
+    const lower = word.toLocaleLowerCase("it-IT");
+    return lower.charAt(0).toLocaleUpperCase("it-IT") + lower.slice(1);
+  });
 }
 
 function isValidUrl(value: string): boolean {
@@ -154,7 +159,8 @@ export default function CoachEventsPage() {
   const [newFormErr, setNewFormErr] = useState<string>("");
   const [newFormBusy, setNewFormBusy] = useState(false);
 
-  const [editId, setEditId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [panelMode, setPanelMode] = useState<"view" | "edit">("view");
   const [editForm, setEditForm] = useState<EventForm>(createEmptyForm);
   const [rowBusyId, setRowBusyId] = useState<string | null>(null);
   const [rowErr, setRowErr] = useState<string>("");
@@ -186,6 +192,12 @@ export default function CoachEventsPage() {
         .map((row: unknown) => normalizeEvent(row))
         .filter(Boolean) as EventRow[];
       setList(normalized);
+      setOpenId((prev) => {
+        if (!prev) return prev;
+        const exists = normalized.some((item) => item.eventId === prev);
+        if (!exists) setPanelMode("view");
+        return exists ? prev : null;
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Errore sconosciuto.");
       setList([]);
@@ -239,9 +251,7 @@ export default function CoachEventsPage() {
     return map;
   }, [list]);
 
-  function startEdit(row: EventRow) {
-    setEditId(row.eventId);
-    setRowErr("");
+  function setEditFormFromRow(row: EventRow) {
     setEditForm({
       name: row.name,
       typeLabel: row.typeLabel ?? "",
@@ -255,8 +265,73 @@ export default function CoachEventsPage() {
     });
   }
 
+  function isEditDirty(row: EventRow) {
+    return (
+      editForm.name !== row.name ||
+      editForm.typeLabel !== (row.typeLabel ?? "") ||
+      editForm.startDate !== toDateInputValue(row.dateStart) ||
+      editForm.endDate !== toDateInputValue(row.dateEnd) ||
+      editForm.status !== row.status ||
+      editForm.location !== (row.location ?? "") ||
+      editForm.link !== (row.link ?? "") ||
+      editForm.notesPublic !== (row.notesPublic ?? "") ||
+      editForm.notesPrivate !== (row.notesPrivate ?? "")
+    );
+  }
+
+  function handleOpenDetails(row: EventRow) {
+    if (openId && openId !== row.eventId && panelMode === "edit") {
+      const current = eventsById[openId];
+      if (current && isEditDirty(current)) {
+        if (!confirm("Hai modifiche non salvate. Vuoi chiudere e perderle?")) return;
+      }
+    }
+
+    if (openId === row.eventId) {
+      if (panelMode === "edit") {
+        const current = eventsById[openId];
+        if (current && isEditDirty(current)) {
+          if (!confirm("Hai modifiche non salvate. Vuoi chiudere e perderle?")) return;
+        }
+      }
+      setOpenId(null);
+      setPanelMode("view");
+      setRowErr("");
+      return;
+    }
+
+    setOpenId(row.eventId);
+    setPanelMode("view");
+    setRowErr("");
+  }
+
+  function startEdit(row: EventRow) {
+    setOpenId(row.eventId);
+    setPanelMode("edit");
+    setRowErr("");
+    setEditFormFromRow(row);
+  }
+
   function cancelEdit() {
-    setEditId(null);
+    if (openId && eventsById[openId]) {
+      setEditFormFromRow(eventsById[openId]);
+    }
+    setPanelMode("view");
+    setRowErr("");
+  }
+
+  function closeDetails() {
+    setOpenId(null);
+    setPanelMode("view");
+    setRowErr("");
+    setEditForm(createEmptyForm());
+  }
+
+  function closeEditDetails() {
+    if (openId && eventsById[openId] && isEditDirty(eventsById[openId])) {
+      if (!confirm("Hai modifiche non salvate. Vuoi chiudere e perderle?")) return;
+    }
+    closeDetails();
   }
 
   async function handleCreateEvent(e: FormEvent<HTMLFormElement>) {
@@ -309,6 +384,7 @@ export default function CoachEventsPage() {
       setRowErr(validationError);
       return;
     }
+    if (!confirm("Salvare le modifiche?")) return;
     setRowBusyId(eventId);
     try {
       const payload = {
@@ -334,7 +410,7 @@ export default function CoachEventsPage() {
           `Errore aggiornamento evento (${r.status})`;
         throw new Error(msg);
       }
-      setEditId(null);
+      setPanelMode("view");
       await loadEvents();
     } catch (e) {
       setRowErr(e instanceof Error ? e.message : "Errore sconosciuto.");
@@ -344,7 +420,7 @@ export default function CoachEventsPage() {
   }
 
   async function handleDeleteEvent(eventId: string) {
-    if (!confirm("Eliminare questo evento?")) return;
+    if (!confirm("Azione irreversibile. Eliminare questo evento?")) return;
     setRowErr("");
     setRowBusyId(eventId);
     try {
@@ -357,6 +433,10 @@ export default function CoachEventsPage() {
           (data && (data.error || data.message)) ||
           `Errore eliminazione evento (${r.status})`;
         throw new Error(msg);
+      }
+      if (openId === eventId) {
+        setOpenId(null);
+        setPanelMode("view");
       }
       await loadEvents();
     } catch (e) {
@@ -470,7 +550,9 @@ export default function CoachEventsPage() {
                 <th style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>Tipo</th>
                 <th style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>Data</th>
                 <th style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>Stato</th>
-                <th style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>Azioni</th>
+                <th style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>
+                  Dettagli
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -479,144 +561,252 @@ export default function CoachEventsPage() {
                 const endLabel = toDateInputValue(ev.dateEnd);
                 const dateLabel = endLabel ? `${startLabel} - ${endLabel}` : startLabel;
                 const busy = rowBusyId === ev.eventId;
+                const isOpen = openId === ev.eventId;
                 return (
-                  <tr key={ev.eventId}>
-                    <td style={{ padding: "6px 4px" }}>{titleCaseIt(ev.name)}</td>
+                  <Fragment key={ev.eventId}>
+                    <tr>
                     <td style={{ padding: "6px 4px" }}>
-                      {formatTypeUpper(ev.typeLabel)}
+                      {toTitleCaseDisplay(ev.name)}
                     </td>
-                    <td style={{ padding: "6px 4px" }}>{dateLabel}</td>
                     <td style={{ padding: "6px 4px" }}>
-                      {formatStatusItUpper(ev.status)}
+                        {toTitleCaseDisplay(formatTypeUpper(ev.typeLabel))}
                     </td>
-                    <td style={{ padding: "6px 4px", display: "flex", gap: 8 }}>
-                      {editId === ev.eventId ? (
-                        <>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => handleSaveEvent(ev.eventId)}
+                      <td style={{ padding: "6px 4px" }}>{dateLabel}</td>
+                      <td style={{ padding: "6px 4px" }}>
+                        {toTitleCaseDisplay(formatStatusItUpper(ev.status))}
+                      </td>
+                      <td style={{ padding: "6px 4px" }}>
+                        <button type="button" onClick={() => handleOpenDetails(ev)}>
+                          Dettagli
+                        </button>
+                      </td>
+                    </tr>
+                    {isOpen ? (
+                      <tr>
+                        <td colSpan={5} style={{ padding: "10px 4px" }}>
+                          <div
+                            style={{
+                              padding: 12,
+                              borderRadius: 12,
+                              border: "1px solid #eee",
+                              display: "grid",
+                              gap: 12,
+                            }}
                           >
-                            Salva
-                          </button>
-                          <button type="button" disabled={busy} onClick={cancelEdit}>
-                            Annulla
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button type="button" onClick={() => startEdit(ev)} disabled={busy}>
-                            Modifica
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteEvent(ev.eventId)}
-                            disabled={busy}
-                          >
-                            Elimina
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
+                            {panelMode === "view" ? (
+                              <>
+                                <div style={{ display: "grid", gap: 8 }}>
+                                  <div>
+                                    <strong>Nome:</strong> {toTitleCaseDisplay(ev.name)}
+                                  </div>
+                                  <div>
+                                    <strong>Tipo:</strong>{" "}
+                                    {toTitleCaseDisplay(formatTypeUpper(ev.typeLabel))}
+                                  </div>
+                                  <div>
+                                    <strong>Data inizio:</strong> {startLabel || "-"}
+                                  </div>
+                                  <div>
+                                    <strong>Data fine:</strong> {endLabel || "-"}
+                                  </div>
+                                  <div>
+                                    <strong>Stato:</strong>{" "}
+                                    {toTitleCaseDisplay(formatStatusItUpper(ev.status))}
+                                  </div>
+                                  <div>
+                                    <strong>Luogo:</strong>{" "}
+                                    {ev.location ? toTitleCaseDisplay(ev.location) : "-"}
+                                  </div>
+                                  <div>
+                                    <strong>Link:</strong>{" "}
+                                    {ev.link ? (
+                                      <a
+                                        href={ev.link}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                      >
+                                        {ev.link}
+                                      </a>
+                                    ) : (
+                                      "-"
+                                    )}
+                                  </div>
+                                  <div>
+                                    <strong>Note pubbliche:</strong>{" "}
+                                    {ev.notesPublic || "-"}
+                                  </div>
+                                  <div>
+                                    <strong>Note private:</strong>{" "}
+                                    {ev.notesPrivate || "-"}
+                                  </div>
+                                </div>
+                                <div style={{ display: "flex", gap: 8 }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => startEdit(ev)}
+                                    disabled={busy}
+                                  >
+                                    Modifica
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteEvent(ev.eventId)}
+                                    disabled={busy}
+                                  >
+                                    Elimina
+                                  </button>
+                                  <button type="button" onClick={closeDetails}>
+                                    Chiudi
+                                  </button>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div style={{ display: "grid", gap: 10 }}>
+                                  <label style={{ display: "grid", gap: 6 }}>
+                                    <span>Nome *</span>
+                                    <input
+                                      value={editForm.name}
+                                      onChange={(e) =>
+                                        setEditForm((prev) => ({
+                                          ...prev,
+                                          name: e.target.value,
+                                        }))
+                                      }
+                                    />
+                                  </label>
+                                  <label style={{ display: "grid", gap: 6 }}>
+                                    <span>Tipo</span>
+                                    <input
+                                      value={editForm.typeLabel}
+                                      onChange={(e) =>
+                                        setEditForm((prev) => ({
+                                          ...prev,
+                                          typeLabel: e.target.value,
+                                        }))
+                                      }
+                                    />
+                                  </label>
+                                  <label style={{ display: "grid", gap: 6 }}>
+                                    <span>Data inizio *</span>
+                                    <input
+                                      type="date"
+                                      value={editForm.startDate}
+                                      onChange={(e) =>
+                                        setEditForm((prev) => ({
+                                          ...prev,
+                                          startDate: e.target.value,
+                                        }))
+                                      }
+                                    />
+                                  </label>
+                                  <label style={{ display: "grid", gap: 6 }}>
+                                    <span>Data fine</span>
+                                    <input
+                                      type="date"
+                                      value={editForm.endDate}
+                                      onChange={(e) =>
+                                        setEditForm((prev) => ({
+                                          ...prev,
+                                          endDate: e.target.value,
+                                        }))
+                                      }
+                                    />
+                                  </label>
+                                  <label style={{ display: "grid", gap: 6 }}>
+                                    <span>Stato *</span>
+                                    <select
+                                      value={editForm.status}
+                                      onChange={(e) =>
+                                        setEditForm((prev) => ({
+                                          ...prev,
+                                          status: e.target.value as EventStatus,
+                                        }))
+                                      }
+                                    >
+                                      <option value="PLANNED">PLANNED</option>
+                                      <option value="DONE">DONE</option>
+                                      <option value="CANCELLED">CANCELLED</option>
+                                    </select>
+                                  </label>
+                                  <label style={{ display: "grid", gap: 6 }}>
+                                    <span>Luogo</span>
+                                    <input
+                                      value={editForm.location}
+                                      onChange={(e) =>
+                                        setEditForm((prev) => ({
+                                          ...prev,
+                                          location: e.target.value,
+                                        }))
+                                      }
+                                    />
+                                  </label>
+                                  <label style={{ display: "grid", gap: 6 }}>
+                                    <span>Link</span>
+                                    <input
+                                      type="url"
+                                      value={editForm.link}
+                                      onChange={(e) =>
+                                        setEditForm((prev) => ({
+                                          ...prev,
+                                          link: e.target.value,
+                                        }))
+                                      }
+                                    />
+                                  </label>
+                                  <label style={{ display: "grid", gap: 6 }}>
+                                    <span>Note pubbliche</span>
+                                    <textarea
+                                      value={editForm.notesPublic}
+                                      onChange={(e) =>
+                                        setEditForm((prev) => ({
+                                          ...prev,
+                                          notesPublic: e.target.value,
+                                        }))
+                                      }
+                                    />
+                                  </label>
+                                  <label style={{ display: "grid", gap: 6 }}>
+                                    <span>Note private</span>
+                                    <textarea
+                                      value={editForm.notesPrivate}
+                                      onChange={(e) =>
+                                        setEditForm((prev) => ({
+                                          ...prev,
+                                          notesPrivate: e.target.value,
+                                        }))
+                                      }
+                                    />
+                                  </label>
+                                </div>
+                                {rowErr ? <p>Errore: {rowErr}</p> : null}
+                                <div style={{ display: "flex", gap: 8 }}>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => handleSaveEvent(ev.eventId)}
+                                  >
+                                    Salva
+                                  </button>
+                                  <button type="button" disabled={busy} onClick={cancelEdit}>
+                                    Annulla
+                                  </button>
+                                  <button type="button" disabled={busy} onClick={closeEditDetails}>
+                                    Chiudi
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 );
               })}
             </tbody>
           </table>
         </div>
-
-        {editId ? (
-          <div style={{ padding: 12, borderRadius: 12, border: "1px solid #eee" }}>
-            <div style={{ display: "grid", gap: 10 }}>
-              <label style={{ display: "grid", gap: 6 }}>
-                <span>Nome *</span>
-                <input
-                  value={editForm.name}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
-                />
-              </label>
-              <label style={{ display: "grid", gap: 6 }}>
-                <span>Tipo</span>
-                <input
-                  value={editForm.typeLabel}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({ ...prev, typeLabel: e.target.value }))
-                  }
-                />
-              </label>
-              <label style={{ display: "grid", gap: 6 }}>
-                <span>Data inizio *</span>
-                <input
-                  type="date"
-                  value={editForm.startDate}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({ ...prev, startDate: e.target.value }))
-                  }
-                />
-              </label>
-              <label style={{ display: "grid", gap: 6 }}>
-                <span>Data fine</span>
-                <input
-                  type="date"
-                  value={editForm.endDate}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({ ...prev, endDate: e.target.value }))
-                  }
-                />
-              </label>
-              <label style={{ display: "grid", gap: 6 }}>
-                <span>Stato *</span>
-                <select
-                  value={editForm.status}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({ ...prev, status: e.target.value as EventStatus }))
-                  }
-                >
-                  <option value="PLANNED">PLANNED</option>
-                  <option value="DONE">DONE</option>
-                  <option value="CANCELLED">CANCELLED</option>
-                </select>
-              </label>
-              <label style={{ display: "grid", gap: 6 }}>
-                <span>Luogo</span>
-                <input
-                  value={editForm.location}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({ ...prev, location: e.target.value }))
-                  }
-                />
-              </label>
-              <label style={{ display: "grid", gap: 6 }}>
-                <span>Link</span>
-                <input
-                  type="url"
-                  value={editForm.link}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({ ...prev, link: e.target.value }))
-                  }
-                />
-              </label>
-              <label style={{ display: "grid", gap: 6 }}>
-                <span>Note pubbliche</span>
-                <textarea
-                  value={editForm.notesPublic}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({ ...prev, notesPublic: e.target.value }))
-                  }
-                />
-              </label>
-              <label style={{ display: "grid", gap: 6 }}>
-                <span>Note private</span>
-                <textarea
-                  value={editForm.notesPrivate}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({ ...prev, notesPrivate: e.target.value }))
-                  }
-                />
-              </label>
-            </div>
-          </div>
-        ) : null}
 
         <div>
           {!showNewForm ? (
